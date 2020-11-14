@@ -1,8 +1,11 @@
 {
   "name": "dldb",
-  "version": "0.0.1",
-  "description": "Delay Line Database",
+  "version": "0.0.2",
+  "description": "Delay Line Memory Database",
   "main": "dist/index.js",
+  "bin": {
+    "dldbd": "./dist/server.js"
+  },
   "scripts": {
     "start": "node dist/server.js",
     "build": "tsc",
@@ -15,7 +18,12 @@
   "keywords": [
     "DLM",
     "delay",
+    "delay line memory",
+    "delay line memory database",
     "line",
+    "memory",
+    "memory database",
+    "cloud memory database",
     "database",
     "cloud"
   ],

@@ -1,3 +1,5 @@
+#!/usr/bin/env node
+
 import HttpUtils, {HttpMethod} from "./HttpUtils";
 import {DLDB_HOSTNAME, DLDB_INCOMING_SECRET, DLDB_NODES, DLDB_PORT, DLDB_SEND_DELAY} from "./Environment";
 import {IncomingMessage, ServerResponse} from "http";

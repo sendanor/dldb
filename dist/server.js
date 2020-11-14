@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 "use strict";
 exports.__esModule = true;
 var HttpUtils_1 = require("./HttpUtils");

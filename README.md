@@ -6,6 +6,10 @@ This is a proof of concept REST backend for a cloud based [Delay Line Memory](ht
 
 The bundled compiled backend does not have installable dependencies except Node v14 LTS and NPM command.
 
+Clone it from Github using `git clone https://github.com/sendanor/dldb.git dldb` and start the node using command `npm start`.
+
+...or install it from the NPM: `npm install dldb` and start the node using `dldbd` command.
+
 ### Building the node backend
 
 Building is not strictly necessary, since the git repository includes already compiled dist directory.

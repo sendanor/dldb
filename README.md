@@ -2,6 +2,11 @@
 
 This is a proof of concept REST backend for a cloud based [Delay Line Memory](https://en.m.wikipedia.org/wiki/Delay_line_memory) database.
 
+This database is like a memory database, but instead of memory, it transmits the data to another node over the network 
+in an infinite loop and does not save the data locally. 
+
+Essentially the data is in the network data stream between the nodes.
+
 ### Installing the backend 
 
 The bundled compiled backend does not have installable dependencies except Node v14 LTS and NPM command.

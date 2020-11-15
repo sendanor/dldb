@@ -2,9 +2,11 @@
 
 export enum RoutePath {
 
-    INCOMING_DATA        = '/incomingData',
+    INCOMING_DATA_REQUEST  = '/r',
 
-    DELAYED_DATA_REQUEST = '/'
+    INCOMING_DATA          = '/d',
+
+    DELAYED_DATA_REQUEST   = '/'
 
 }
 

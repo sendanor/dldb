@@ -26,3 +26,13 @@ export const DLDB_INCOMING_SECRET : string = process?.env?.DLDB_INCOMING_SECRET 
  * Delay to wait until sending the data to remote node(s) in milliseconds.
  */
 export const DLDB_SEND_DELAY : number = parseInt(process?.env?.DLDB_SEND_DELAY ?? '300', 10);
+
+/**
+ * Public host for local DLDB node, eg. hostname[:port] and defaults to localhost:{DLDB_PORT}
+ */
+export const DLDB_PUBLIC_HOST : string               = process?.env?.DLDB_PUBLIC_HOST ?? `localhost:${DLDB_PORT}`;
+
+/**
+ * Public URL for local DLDB node, eg. http://hostname[:port] and defaults to http://{DLDB_PUBLIC_HOST}
+ */
+export const DLDB_PUBLIC_URL : string                = process?.env?.DLDB_PUBLIC_URL ?? `http://${DLDB_PUBLIC_HOST}`;

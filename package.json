@@ -1,6 +1,6 @@
 {
   "name": "dldb",
-  "version": "0.0.2",
+  "version": "0.1.0",
   "description": "Delay Line Memory Database",
   "main": "dist/index.js",
   "bin": {

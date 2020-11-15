@@ -107,7 +107,13 @@ export class HttpUtils {
 
                     try {
 
-                        resolve(HttpUtils.parseResponseJson(res));
+                        const statusCode : number = res?.statusCode ?? 0;
+
+                        if (statusCode >= 200 && statusCode < 300) {
+                            HttpUtils.parseResponseJson(res).then(resolve).catch(reject);
+                        } else {
+                            HttpUtils.parseResponseJson(res).then(reject).catch(reject);
+                        }
 
                     } catch (err) {
                         reject(err);

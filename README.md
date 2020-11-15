@@ -104,17 +104,29 @@ Content-Length: 60
 }
 ```
 
-### The default listening hostname (DLDB_HOSTNAME)
+### The public hostname (`DLDB_PUBLIC_HOST`)
 
-The default listening hostname is 0.0.0.0, eg. every interface on the system.
+The address which other nodes can use to connect to this node.
 
-### The default listening port (DLDB_PORT)
+This is `localhost:{DLDB_PORT}` by default.
 
-Default port is 3000 and can be changed using DLDB_PORT environment variable.
+### The public URL (`DLDB_PUBLIC_URL`)
 
-### Changing the node delay (DLDB_SEND_DELAY)
+The public URL which other nodes can use to connect to this node.
 
-By default the operating node will wait for a 300 ms until sending the data to another node, so that you don't 
-accidentally nuke your system.
+This is `http://{DLDB_PUBLIC_HOST}` by default.
 
-You may change the delay by changing DLDB_SEND_DELAY environment variable.
+### The default listening hostname (`DLDB_HOSTNAME`)
+
+The default listening hostname is `0.0.0.0`, eg. every interface on the system.
+
+### The default listening port (`DLDB_PORT`)
+
+Default port is `3000` and can be changed using `DLDB_PORT` environment variable.
+
+### Changing the node delay (`DLDB_SEND_DELAY`)
+
+If no nodes have requested data, by default the operating node will wait for a 300 ms until sending the data to another
+node, so that you don't accidentally nuke your system.
+
+You may change the delay by changing `DLDB_SEND_DELAY` environment variable.

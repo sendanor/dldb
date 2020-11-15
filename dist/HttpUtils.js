@@ -87,8 +87,15 @@ var HttpUtils = /** @class */ (function () {
                     }
                 };
                 var req = HTTP.request(options, function (res) {
+                    var _a;
                     try {
-                        resolve(HttpUtils.parseResponseJson(res));
+                        var statusCode = (_a = res === null || res === void 0 ? void 0 : res.statusCode) !== null && _a !== void 0 ? _a : 0;
+                        if (statusCode >= 200 && statusCode < 300) {
+                            HttpUtils.parseResponseJson(res).then(resolve)["catch"](reject);
+                        }
+                        else {
+                            HttpUtils.parseResponseJson(res).then(reject)["catch"](reject);
+                        }
                     }
                     catch (err) {
                         reject(err);

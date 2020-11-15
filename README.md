@@ -7,6 +7,13 @@ in an infinite loop and does not save the data locally.
 
 Essentially the data is in the network data stream between the nodes.
 
+It...
+
+ * does not save state of data anywhere on the computer running the node
+ * When there are no nodes waiting for data, automatically selects the slowest link on average
+ * In case of a shutdown of a single node, it tries to make sure all active requests have been served (eg. the data is on another node)
+ * Can notify other nodes about a desire to read or write data
+
 ### Installing the backend 
 
 The bundled compiled backend does not have installable dependencies except Node v14 LTS and NPM command.

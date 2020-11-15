@@ -6,7 +6,7 @@ import {
     DLDB_INCOMING_SECRET,
     DLDB_MINIMUM_NETWORK_DELAY,
     DLDB_NODES,
-    DLDB_PUBLIC_URL,
+    DLDB_PUBLIC_URL, DLDB_REQUEST_SECRET,
     DLDB_SEND_DELAY
 } from "./Environment";
 import {ObjectUtils} from "./ObjectUtils";
@@ -20,6 +20,8 @@ export enum DataRequestLevel {
 }
 
 export interface GetQueueObject {
+
+    id: string;
 
     res: ServerResponse;
 
@@ -58,6 +60,8 @@ export interface DLDBIncomingDataObject {
 
 export interface DLDBIncomingDataRequestObject {
 
+    readonly secret  : string;
+
     readonly from    : string;
 
     readonly level   : DataRequestLevel;
@@ -68,11 +72,14 @@ export class DLDBServer {
 
     private _serverStateOk : boolean;
 
-    private readonly _getQueue  : Array<GetQueueObject>;
+    private _timeoutCallback : Record<string, any>;
+    private _timeout         : Record<string, any>;
 
-    private readonly _postQueue : Array<PostQueueObject>;
+    private _getQueue  : Array<GetQueueObject>;
 
-    private readonly _nodeDataRequestLevels : Record<string, DataRequestLevel>;
+    private _postQueue : Array<PostQueueObject>;
+
+    private readonly _nodeDataRequestLevels : Record<string, Record<string, DataRequestLevel>>;
     private readonly _nodeAverageSpeed      : Record<string, number>;
     private readonly _nodeAverageSampleSize : Record<string, number>;
 
@@ -88,6 +95,8 @@ export class DLDBServer {
 
         this._nodeAverageSpeed = {};
         this._nodeAverageSampleSize = {};
+        this._timeoutCallback = {};
+        this._timeout = {};
 
     }
 
@@ -113,7 +122,8 @@ export class DLDBServer {
         const level = this._parseDataRequestLevel(data?.level);
 
         return !!(
-            secret && payload && typeof secret === 'string'
+            payload
+            && secret && typeof secret === 'string'
             && from && typeof from === 'string'
             && typeof payload === 'object' && !(payload instanceof Array)
             && level !== undefined && typeof level === 'number'
@@ -123,12 +133,15 @@ export class DLDBServer {
 
     private static _isIncomingDataRequestObject (data: Record<string, any>) : data is DLDBIncomingDataRequestObject {
 
+        const secret = data?.secret;
+
         const from = data?.from;
 
         const level = this._parseDataRequestLevel(data?.level);
 
         return !!(
             from && typeof from === 'string'
+            && secret && typeof secret === 'string'
             && level !== undefined  && typeof level === 'number'
         );
 
@@ -214,12 +227,13 @@ export class DLDBServer {
      *
      * @param data
      * @param targetUrl
+     * @param resourceId
      */
-    private sendDataToSingleTarget (data: DLDBIncomingDataObject, targetUrl: string) : Promise<void> {
+    private sendDataToSingleTarget (data: DLDBIncomingDataObject, targetUrl: string, resourceId: string) : Promise<void> {
 
         const startTime = Date.now();
 
-        const url = `${targetUrl}${RoutePath.INCOMING_DATA}`;
+        const url = `${targetUrl}${RoutePath.INCOMING_DATA}/${resourceId}`;
 
         return HttpUtils.request(HttpMethod.POST, url, data).then(
             (responseData : Record<string, any>) => {
@@ -227,24 +241,31 @@ export class DLDBServer {
                 const endTime = Date.now();
                 const duration = endTime - startTime;
 
-                if (ObjectUtils.hasProperty(this._nodeDataRequestLevels, targetUrl)) {
+                if ( ObjectUtils.hasProperty(this._nodeDataRequestLevels, targetUrl)
+                    && ObjectUtils.hasProperty(this._nodeDataRequestLevels[targetUrl], resourceId) ) {
+
+                    const levels = this._nodeDataRequestLevels[targetUrl];
 
                     if (data.level === DataRequestLevel.WRITE_ACCESS) {
 
-                        delete this._nodeDataRequestLevels[targetUrl];
+                        delete levels[resourceId];
 
-                        console.log( `[${duration} ms] Sent writable data to ${targetUrl}: It's no longer marked to wait for data`);
+                        console.log( `[${resourceId}] [${duration} ms] [${resourceId}] Sent writable data to ${targetUrl}: It's no longer marked to wait for data`);
 
-                    } else if (this._nodeDataRequestLevels[targetUrl] === DataRequestLevel.READ_ACCESS) {
+                    } else if (levels[resourceId] === DataRequestLevel.READ_ACCESS) {
 
-                        delete this._nodeDataRequestLevels[targetUrl];
+                        delete levels[resourceId];
 
-                        console.log( `[${duration} ms] Sent read-only data (${data.level}) to ${targetUrl}: It's no longer marked to wait for data`);
+                        console.log( `[${resourceId}] [${duration} ms] [${resourceId}] Sent read-only data (${data.level}) to ${targetUrl}: It's no longer marked to wait for data`);
 
                     } else {
 
-                        console.log( `[${duration} ms] Sent read-only data (${data.level}) to ${targetUrl}: It's still waiting writable data (${this._nodeDataRequestLevels[targetUrl]})`);
+                        console.log( `[${resourceId}] [${duration} ms] [${resourceId}] Sent read-only data (${data.level}) to ${targetUrl}: It's still waiting writable data (${levels[resourceId]})`);
 
+                    }
+
+                    if (Object.keys(levels).length <= 0) {
+                        delete this._nodeDataRequestLevels[targetUrl];
                     }
 
                 // } else if (data.level === DataRequestLevel.READ_ACCESS) {
@@ -257,12 +278,12 @@ export class DLDBServer {
 
                     this._serverStateOk = true;
 
-                    console.log(`[${duration} ms] ${url} [SUCCESS]: Node state OK`);
+                    console.log(`[${resourceId}] [${duration} ms] ${url} [SUCCESS]: Node state OK`);
 
                 } else {
 
                     if (responseData?.status !== DLDBResponseStatus.OK) {
-                        console.log(`[${duration} ms] ${url} [SUCCESS]: `, responseData);
+                        console.log(`[${resourceId}] [${duration} ms] ${url} [SUCCESS]: `, responseData);
                     }
 
                 }
@@ -283,7 +304,7 @@ export class DLDBServer {
                     const newAverageSpeed = this._nodeAverageSpeed[targetUrl] = prevAverageSpeed + ( duration - prevAverageSpeed ) / (prevSampleSize + 1);
 
                     if ( `${Math.round(newAverageSpeed / 100)}` !== `${Math.round(prevAverageSpeed / 100)}` ) {
-                        console.log(`Node ${targetUrl} average speed updated as ${newAverageSpeed} ms (from ${prevAverageSpeed})`);
+                        console.log(`[${resourceId}] Node ${targetUrl} average speed updated as ${newAverageSpeed} ms (from ${prevAverageSpeed})`);
                     }
 
                 }
@@ -291,7 +312,7 @@ export class DLDBServer {
             }
         ).catch( err => {
 
-            console.error(`${url} [FAIL]: ` , err);
+            console.error(`[${resourceId}] ${url} [FAIL]: ` , err);
 
             this._serverStateOk = false;
 
@@ -301,11 +322,15 @@ export class DLDBServer {
 
     }
 
-    public _getTargetsRequestingWriteAccess () : Array<string> {
+    public _getTargetsRequestingWriteAccess (resourceId : string) : Array<string> {
 
         return Object.keys(this._nodeDataRequestLevels).filter( (targetUrl : string) : boolean => {
 
-            const targetLevel = this._nodeDataRequestLevels[targetUrl];
+            if (!ObjectUtils.hasProperty(this._nodeDataRequestLevels[targetUrl], resourceId)) {
+                return false;
+            }
+
+            const targetLevel = this._nodeDataRequestLevels[targetUrl][resourceId];
 
             return targetLevel === DataRequestLevel.WRITE_ACCESS;
 
@@ -313,11 +338,15 @@ export class DLDBServer {
 
     }
 
-    public _getTargetsRequestingReadAccess () : Array<string> {
+    public _getTargetsRequestingReadAccess (resourceId : string) : Array<string> {
 
         return Object.keys(this._nodeDataRequestLevels).filter( (targetUrl : string) : boolean => {
 
-            const targetLevel = this._nodeDataRequestLevels[targetUrl];
+            if (!ObjectUtils.hasProperty(this._nodeDataRequestLevels[targetUrl], resourceId)) {
+                return false;
+            }
+
+            const targetLevel = this._nodeDataRequestLevels[targetUrl][resourceId];
 
             return targetLevel === DataRequestLevel.READ_ACCESS;
 
@@ -325,23 +354,27 @@ export class DLDBServer {
 
     }
 
-    public _getTargetsRequestingReadOrWriteAccess () : Array<string> {
+    public _getTargetsRequestingReadOrWriteAccess (resourceId : string) : Array<string> {
 
-        return Object.keys(this._nodeDataRequestLevels);
+        return Object.keys(this._nodeDataRequestLevels).filter( (targetUrl : string) : boolean => {
+
+            return ObjectUtils.hasProperty(this._nodeDataRequestLevels[targetUrl], resourceId);
+
+        });
 
     }
 
-    public _getNextTargetByRequest (level: DataRequestLevel, targets: Array<string>) : string {
+    public _getNextTargetByRequest (level: DataRequestLevel, targets: Array<string>, resourceId : string) : string {
 
         if (level === DataRequestLevel.WRITE_ACCESS) {
 
-            const targetsWantingWriteAccess = this._getTargetsRequestingWriteAccess();
+            const targetsWantingWriteAccess = this._getTargetsRequestingWriteAccess(resourceId);
 
             if (targetsWantingWriteAccess.length) {
 
                 const target = DLDBServer._getNextTargetByRandom(targetsWantingWriteAccess);
 
-                console.log(`${targetsWantingWriteAccess.length} nodes requested write access, picked: ${target}${targetsWantingWriteAccess.length >= 2 ? ' by random' : '' }`);
+                console.log(`[${resourceId}] ${targetsWantingWriteAccess.length} nodes requested write access, picked: ${target}${targetsWantingWriteAccess.length >= 2 ? ' by random' : '' }`);
 
                 return target;
 
@@ -349,13 +382,13 @@ export class DLDBServer {
 
         }
 
-        const targetsWantingAnyAccess = this._getTargetsRequestingReadOrWriteAccess();
+        const targetsWantingAnyAccess = this._getTargetsRequestingReadOrWriteAccess(resourceId);
 
         if (targetsWantingAnyAccess.length) {
 
             const target = DLDBServer._getNextTargetByRandom(targetsWantingAnyAccess);
 
-            console.log(`${targetsWantingAnyAccess.length} nodes requested read access, picked: ${target}${targetsWantingAnyAccess.length >= 2 ? ' by random' : '' }`);
+            console.log(`[${resourceId}] ${targetsWantingAnyAccess.length} nodes requested read access, picked: ${target}${targetsWantingAnyAccess.length >= 2 ? ' by random' : '' }`);
 
             return target;
 
@@ -365,9 +398,7 @@ export class DLDBServer {
             return targets[0];
         }
 
-        const target = this._getSlowestTarget(targets);
-        //console.log(`Picked next target ${target} by random.`);
-        return target;
+        return this._getSlowestTarget(targets);
 
     }
 
@@ -376,20 +407,21 @@ export class DLDBServer {
      *
      * @param data
      * @param targets
+     * @param resourceId
      */
-    public sendDataToOneOfTargets (data: DLDBIncomingDataObject, targets: Array<string>) : string {
+    public sendDataToOneOfTargets (data: DLDBIncomingDataObject, targets: Array<string>, resourceId: string) : string {
 
         if (!DLDBServer._isIncomingDataObject(data)) {
-            throw new TypeError('Cannot send invalid data object');
+            throw new TypeError('[' + resourceId + '] Cannot send invalid data object');
         }
 
-        let targetUrl = this._getNextTargetByRequest(data.level, targets);
+        let targetUrl = this._getNextTargetByRequest(data.level, targets, resourceId);
 
-        this.sendDataToSingleTarget(data, targetUrl).catch( () => {
+        this.sendDataToSingleTarget(data, targetUrl, resourceId).catch( () => {
 
             if (data.level === DataRequestLevel.WRITE_ACCESS) {
 
-                this.sendDataToOneOfTargets(data, targets);
+                this.sendDataToOneOfTargets(data, targets, resourceId);
 
             }
 
@@ -404,19 +436,21 @@ export class DLDBServer {
      *
      * @param level
      * @param targets
+     * @param resourceId
+     * @param secret
      */
-    public static sendDataRequest (level: DataRequestLevel, targets: Array<string>) {
+    public static sendDataRequest (level: DataRequestLevel, targets: Array<string>, resourceId: string, secret: string) {
 
         targets.forEach((targetUrl: string) => {
 
-            const url = `${targetUrl}${RoutePath.INCOMING_DATA_REQUEST}`;
+            const url = `${targetUrl}${RoutePath.INCOMING_DATA_REQUEST}/${resourceId}`;
 
-            HttpUtils.request(HttpMethod.POST, url, {from: DLDB_PUBLIC_URL, level: level}).then(
+            HttpUtils.request(HttpMethod.POST, url, {secret: secret, from: DLDB_PUBLIC_URL, level: level}).then(
                 (data : Record<string, any>) => {
-                    console.log(`${url} [SUCCESS]: `, data.status);
+                    console.log(`[${resourceId}] ${url} [SUCCESS]: `, data.status);
                 }
             ).catch( err => {
-                console.error(`${url} [FAIL]: ` , err);
+                console.error(`[${resourceId}] ${url} [FAIL]: ` , err);
             });
 
         });
@@ -430,15 +464,21 @@ export class DLDBServer {
      *
      * Returns the updated data.
      */
-    public processIncomingDataPayload (level: DataRequestLevel, data: Record<string, any>) : Record<string, any> {
+    public processIncomingDataPayload (level: DataRequestLevel, data: Record<string, any>, resourceId: string) : Record<string, any> {
 
         let newData = data;
 
+        let postQueue = this._postQueue.filter(item => item.id === resourceId);
+        let getQueue  =  this._getQueue.filter(item => item.id === resourceId);
+
+        this._postQueue = this._postQueue.filter(item => item.id !== resourceId);
+        this._getQueue  =  this._getQueue.filter(item => item.id !== resourceId);
+
         if (level === DataRequestLevel.WRITE_ACCESS) {
 
-            while (this._postQueue.length) {
+            while (postQueue.length) {
 
-                const item : PostQueueObject = this._postQueue.shift();
+                const item : PostQueueObject = postQueue.shift();
 
                 const oldData = data;
 
@@ -447,17 +487,17 @@ export class DLDBServer {
                     ...item.input
                 };
 
-                console.log('DLDB state changed from ', oldData, ' to ', newData, ' with ', item.input);
+                console.log(`[${resourceId}] DLDB state changed from `, oldData, ' to ', newData, ' with ', item.input);
 
-                this._getQueue.push(item);
+                getQueue.push(item);
 
             }
 
         }
 
-        while (this._getQueue.length) {
+        while (getQueue.length) {
 
-            const item : GetQueueObject = this._getQueue.shift();
+            const item : GetQueueObject = getQueue.shift();
 
             HttpUtils.jsonResponse(item.res,200, {payload: newData});
 
@@ -475,17 +515,20 @@ export class DLDBServer {
      * @param method
      * @param req
      * @param res
+     * @param resourceId
      */
-    public delayedDataRequest (method : HttpMethod, req: IncomingMessage, res: ServerResponse) {
+    public delayedDataRequest (method : HttpMethod, req: IncomingMessage, res: ServerResponse, resourceId: string) {
 
         // Append the request to queues
         switch (method) {
 
             case HttpMethod.GET:
 
-                this._getQueue.push({res});
+                this._getQueue.push({res, id: resourceId});
 
-                DLDBServer.sendDataRequest(DataRequestLevel.READ_ACCESS, DLDB_NODES);
+                DLDBServer.sendDataRequest(DataRequestLevel.READ_ACCESS, DLDB_NODES, resourceId, DLDB_REQUEST_SECRET);
+
+                this._clearTimeout(resourceId);
 
                 break;
 
@@ -493,9 +536,11 @@ export class DLDBServer {
 
                 HttpUtils.parseResponseJson(req).then( (data : any) => {
 
-                    this._postQueue.push({res, input: data});
+                    this._postQueue.push({res, input: data, id: resourceId});
 
-                    DLDBServer.sendDataRequest(DataRequestLevel.WRITE_ACCESS, DLDB_NODES);
+                    DLDBServer.sendDataRequest(DataRequestLevel.WRITE_ACCESS, DLDB_NODES, resourceId, DLDB_REQUEST_SECRET);
+
+                    this._clearTimeout(resourceId);
 
                 }).catch( err => DLDBServer.processBadRequestParseErrorResponse(res, err) );
 
@@ -506,13 +551,12 @@ export class DLDBServer {
 
         }
 
-
     }
 
     /**
      * Process incoming data
      */
-    private processIncomingData (res : ServerResponse, data : DLDBIncomingDataObject) {
+    private processIncomingData (res : ServerResponse, data : DLDBIncomingDataObject, resourceId: string) {
 
         const passphrase = data.secret;
 
@@ -532,36 +576,44 @@ export class DLDBServer {
         // Clear the data request state since clearly the packet just came from there
         if ( ObjectUtils.hasProperty(this._nodeDataRequestLevels, from) ) {
 
-            if (data.level === DataRequestLevel.WRITE_ACCESS) {
-                delete this._nodeDataRequestLevels[from];
-                console.log(`${from} no longer marked to want data, since we received writable data from there.`);
-            }
+            if (ObjectUtils.hasProperty(this._nodeDataRequestLevels[from], resourceId)) {
 
-            if (data.level === DataRequestLevel.READ_ACCESS && this._nodeDataRequestLevels[from] === DataRequestLevel.READ_ACCESS) {
-                delete this._nodeDataRequestLevels[from];
-                console.log(`${from} no longer marked to want data, since we received read only data from there.`);
+                if (data.level === DataRequestLevel.WRITE_ACCESS) {
+                    delete this._nodeDataRequestLevels[from][resourceId];
+                    console.log(`${from} no longer marked to want data, since we received writable data from there.`);
+                }
+
+                if (data.level === DataRequestLevel.READ_ACCESS && this._nodeDataRequestLevels[from][resourceId] === DataRequestLevel.READ_ACCESS) {
+                    delete this._nodeDataRequestLevels[from][resourceId];
+                    console.log(`${from} no longer marked to want data, since we received read only data from there.`);
+                }
+
+                if (Object.keys(this._nodeDataRequestLevels[from]).length <= 0) {
+                    delete this._nodeDataRequestLevels[from];
+                }
+
             }
 
         }
 
         const payload = data.payload ?? {};
 
-        const newData = this.processIncomingDataPayload(data.level, payload);
+        const newData = this.processIncomingDataPayload(data.level, payload, resourceId);
 
         HttpUtils.jsonResponse(res,200, {status: DLDBResponseStatus.OK });
 
         if (data.level === DataRequestLevel.WRITE_ACCESS) {
 
-            if (this._getTargetsRequestingReadOrWriteAccess().length) {
+            if (this._getTargetsRequestingReadOrWriteAccess(resourceId).length) {
 
                 const writeTarget = this.sendDataToOneOfTargets({
                     from: DLDB_PUBLIC_URL,
                     secret: passphrase,
                     level: DataRequestLevel.WRITE_ACCESS,
                     payload: newData
-                }, DLDB_NODES);
+                }, DLDB_NODES, resourceId);
 
-                const readOnlyTargets = this._getTargetsRequestingReadAccess().filter(item => item !== writeTarget);
+                const readOnlyTargets = this._getTargetsRequestingReadAccess(resourceId).filter(item => item !== writeTarget);
 
                 if (readOnlyTargets.length) {
 
@@ -572,7 +624,7 @@ export class DLDBServer {
                             secret: passphrase,
                             level: DataRequestLevel.READ_ACCESS,
                             payload: newData
-                        }, [readTarget]);
+                        }, [readTarget], resourceId);
 
                     });
 
@@ -580,18 +632,45 @@ export class DLDBServer {
 
             } else {
 
-                setTimeout(() => {
+                this._clearTimeout(resourceId);
+
+                this._timeoutCallback[resourceId] = () => {
+
+                    delete this._timeout[resourceId];
+                    delete this._timeoutCallback[resourceId];
 
                     this.sendDataToOneOfTargets({
                         from: DLDB_PUBLIC_URL,
                         secret: passphrase,
                         level: DataRequestLevel.WRITE_ACCESS,
                         payload: newData
-                    }, DLDB_NODES);
+                    }, DLDB_NODES, resourceId);
 
-                }, DLDB_SEND_DELAY);
+                };
+
+                this._timeout[resourceId] = setTimeout(this._timeoutCallback[resourceId], DLDB_SEND_DELAY);
 
             }
+
+        }
+
+    }
+
+    private _clearTimeout (resourceId : string) {
+
+        if (ObjectUtils.hasProperty(this._timeout, resourceId)) {
+
+            clearTimeout(this._timeout[resourceId]);
+
+            delete this._timeout[resourceId];
+
+        }
+
+        if ( ObjectUtils.hasProperty(this._timeoutCallback, resourceId) ) {
+
+            this._timeoutCallback[resourceId]();
+
+            delete this._timeoutCallback[resourceId];
 
         }
 
@@ -600,9 +679,14 @@ export class DLDBServer {
     /**
      * Process request for incoming data
      */
-    private processIncomingDataRequest (res : ServerResponse, data : DLDBIncomingDataRequestObject) {
+    private processIncomingDataRequest (res : ServerResponse, data : DLDBIncomingDataRequestObject, resourceId : string) {
 
-        // FIXME: Implement a security check to validate where the request originated
+        const passphrase = data?.secret;
+
+        if ( !passphrase || (passphrase !== DLDB_REQUEST_SECRET) ) {
+            HttpUtils.errorResponse(res,403, 'Access Denied', {status: DLDBResponseStatus.ERROR});
+            return;
+        }
 
         const from = data.from;
 
@@ -616,33 +700,41 @@ export class DLDBServer {
 
         if (ObjectUtils.hasProperty(this._nodeDataRequestLevels, from)) {
 
-            if (level > this._nodeDataRequestLevels[from]) {
+            if (ObjectUtils.hasProperty(this._nodeDataRequestLevels[from], resourceId)) {
 
-                this._nodeDataRequestLevels[from] = level;
+                if (level > this._nodeDataRequestLevels[from][resourceId]) {
 
-                changed = true;
+                    this._nodeDataRequestLevels[from][resourceId] = level;
 
-                console.log(`${from} is waiting for writable data (${level}) now`);
+                    changed = true;
+
+                    console.log(`[${resourceId}] ${from} is waiting for writable data (${level}) now`);
+
+                }
 
             }
 
         } else {
 
-            this._nodeDataRequestLevels[from] = level;
+            this._nodeDataRequestLevels[from] = {[resourceId]: level};
 
             changed = true;
 
             if (level === DataRequestLevel.WRITE_ACCESS) {
-                console.log(`${from} is waiting for writable data (${level}) now`);
+                console.log(`[${resourceId}] ${from} is waiting for writable data (${level}) now`);
             } else {
-                console.log(`${from} is waiting for read-only data (${level}) now`);
+                console.log(`[${resourceId}] ${from} is waiting for read-only data (${level}) now`);
             }
 
         }
 
         if (!changed) {
 
-            console.warn(`${from} notified us, but we knew it already.`);
+            console.warn(`[${resourceId}] ${from} notified us, but we knew it already.`);
+
+        } else {
+
+            this._clearTimeout(resourceId);
 
         }
 
@@ -664,55 +756,91 @@ export class DLDBServer {
 
             const method : HttpMethod | undefined = HttpUtils.parseHttpMethod(req.method);
 
-            switch (url) {
+            // Handles incoming data
+            if (url.startsWith(RoutePath.INCOMING_DATA + '/')) {
 
-                case RoutePath.INCOMING_DATA:
+                const resourceId = DLDBServer.parseResourceId(url, RoutePath.INCOMING_DATA + '/');
 
-                    HttpUtils.parseResponseJson(req).then( (data : Record<string, any>) => {
+                if (resourceId) {
+
+                    HttpUtils.parseResponseJson(req).then((data: Record<string, any>) => {
 
                         if (DLDBServer._isIncomingDataObject(data)) {
-                            this.processIncomingData(res, data);
+                            this.processIncomingData(res, data, resourceId);
                         } else {
 
                             DLDBServer.processBadRequestInvalidObjectResponse(res);
 
-                            console.log('Invalid Object: ', data);
+                            console.log(`[${resourceId}] Invalid Object: `, data);
 
                         }
 
-                    }).catch( err => DLDBServer.processBadRequestParseErrorResponse(res, err) );
+                    }).catch(err => DLDBServer.processBadRequestParseErrorResponse(res, err));
 
-                    break;
-
-                case RoutePath.INCOMING_DATA_REQUEST:
-                    HttpUtils.parseResponseJson(req).then( (data : Record<string, any>) => {
-
-                        if (DLDBServer._isIncomingDataRequestObject(data)) {
-
-                            this.processIncomingDataRequest(res, data);
-
-                        } else {
-
-                            DLDBServer.processBadRequestInvalidObjectResponse(res);
-
-                            console.log('Invalid Object: ', data);
-
-                        }
-
-                    }).catch( err => DLDBServer.processBadRequestParseErrorResponse(res, err) );
-                    break;
-
-                case RoutePath.DELAYED_DATA_REQUEST:
-                    this.delayedDataRequest(method, req, res);
-                    break;
-
-                default:
+                } else {
                     DLDBServer.processNotFoundResponse(res);
+                }
+
+                return;
 
             }
 
+            // Handles requests for data to other nodes
+            if (url.startsWith(RoutePath.INCOMING_DATA_REQUEST + '/')) {
+
+                const resourceId = DLDBServer.parseResourceId(url, RoutePath.INCOMING_DATA_REQUEST + '/');
+
+                if (resourceId) {
+
+                    HttpUtils.parseResponseJson(req).then((data: Record<string, any>) => {
+
+                        if (DLDBServer._isIncomingDataRequestObject(data)) {
+
+                            this.processIncomingDataRequest(res, data, resourceId);
+
+                        } else {
+
+                            DLDBServer.processBadRequestInvalidObjectResponse(res);
+
+                            console.log(`[${resourceId}] Invalid Object: `, data);
+
+                        }
+
+                    }).catch(err => DLDBServer.processBadRequestParseErrorResponse(res, err));
+
+                } else {
+
+                    DLDBServer.processNotFoundResponse(res);
+
+                }
+
+                return;
+
+            }
+
+            // Handles data requests from users
+            if (url.startsWith(RoutePath.DELAYED_DATA_REQUEST)) {
+
+                const resourceId = DLDBServer.parseResourceId(url, RoutePath.DELAYED_DATA_REQUEST);
+
+                if (resourceId) {
+
+                    this.delayedDataRequest(method, req, res, resourceId);
+
+                } else {
+                    DLDBServer.processNotFoundResponse(res);
+                }
+
+                return;
+
+            }
+
+            DLDBServer.processNotFoundResponse(res);
+
         } catch (err) {
+
             DLDBServer.processInternalErrorResponse(res, err);
+
         }
 
     }
@@ -749,6 +877,42 @@ export class DLDBServer {
 
         HttpUtils.errorResponse(res,400, 'Bad Request: Invalid Object Content', {status: DLDBResponseStatus.ERROR});
 
+    }
+
+    public static parseResourceId (url : string, prefix: string) : string | undefined {
+
+        if (!url) {
+            return undefined;
+        }
+
+        if (typeof url !== 'string') {
+            return undefined;
+        }
+
+        url = url.substr(prefix.length);
+
+        if (!url) {
+            return undefined;
+        }
+
+        const parts = url.split('/');
+
+        if (parts.length <= 0) {
+            return undefined;
+        }
+
+        const id = parts.shift();
+
+        if (!this.checkUuid(id)) {
+            return undefined;
+        }
+
+        return id.toLowerCase();
+
+    }
+
+    public static checkUuid (value : string) : boolean {
+        return /^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$/.test(value);
     }
 
 }

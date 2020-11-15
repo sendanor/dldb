@@ -35,6 +35,8 @@ var DLDBServer = /** @class */ (function () {
         this._nodeDataRequestLevels = {};
         this._nodeAverageSpeed = {};
         this._nodeAverageSampleSize = {};
+        this._timeoutCallback = {};
+        this._timeout = {};
     }
     DLDBServer._parseDataRequestLevel = function (value) {
         switch (value) {
@@ -48,15 +50,18 @@ var DLDBServer = /** @class */ (function () {
         var secret = data === null || data === void 0 ? void 0 : data.secret;
         var payload = data === null || data === void 0 ? void 0 : data.payload;
         var level = this._parseDataRequestLevel(data === null || data === void 0 ? void 0 : data.level);
-        return !!(secret && payload && typeof secret === 'string'
+        return !!(payload
+            && secret && typeof secret === 'string'
             && from && typeof from === 'string'
             && typeof payload === 'object' && !(payload instanceof Array)
             && level !== undefined && typeof level === 'number');
     };
     DLDBServer._isIncomingDataRequestObject = function (data) {
+        var secret = data === null || data === void 0 ? void 0 : data.secret;
         var from = data === null || data === void 0 ? void 0 : data.from;
         var level = this._parseDataRequestLevel(data === null || data === void 0 ? void 0 : data.level);
         return !!(from && typeof from === 'string'
+            && secret && typeof secret === 'string'
             && level !== undefined && typeof level === 'number');
     };
     DLDBServer._getTargetByRandom = function (targets) {
@@ -110,25 +115,31 @@ var DLDBServer = /** @class */ (function () {
      *
      * @param data
      * @param targetUrl
+     * @param resourceId
      */
-    DLDBServer.prototype.sendDataToSingleTarget = function (data, targetUrl) {
+    DLDBServer.prototype.sendDataToSingleTarget = function (data, targetUrl, resourceId) {
         var _this = this;
         var startTime = Date.now();
-        var url = "" + targetUrl + RoutePath_1["default"].INCOMING_DATA;
+        var url = "" + targetUrl + RoutePath_1["default"].INCOMING_DATA + "/" + resourceId;
         return HttpUtils_1["default"].request(HttpUtils_1.HttpMethod.POST, url, data).then(function (responseData) {
             var endTime = Date.now();
             var duration = endTime - startTime;
-            if (ObjectUtils_1.ObjectUtils.hasProperty(_this._nodeDataRequestLevels, targetUrl)) {
+            if (ObjectUtils_1.ObjectUtils.hasProperty(_this._nodeDataRequestLevels, targetUrl)
+                && ObjectUtils_1.ObjectUtils.hasProperty(_this._nodeDataRequestLevels[targetUrl], resourceId)) {
+                var levels = _this._nodeDataRequestLevels[targetUrl];
                 if (data.level === DataRequestLevel.WRITE_ACCESS) {
-                    delete _this._nodeDataRequestLevels[targetUrl];
-                    console.log("[" + duration + " ms] Sent writable data to " + targetUrl + ": It's no longer marked to wait for data");
+                    delete levels[resourceId];
+                    console.log("[" + resourceId + "] [" + duration + " ms] [" + resourceId + "] Sent writable data to " + targetUrl + ": It's no longer marked to wait for data");
                 }
-                else if (_this._nodeDataRequestLevels[targetUrl] === DataRequestLevel.READ_ACCESS) {
-                    delete _this._nodeDataRequestLevels[targetUrl];
-                    console.log("[" + duration + " ms] Sent read-only data (" + data.level + ") to " + targetUrl + ": It's no longer marked to wait for data");
+                else if (levels[resourceId] === DataRequestLevel.READ_ACCESS) {
+                    delete levels[resourceId];
+                    console.log("[" + resourceId + "] [" + duration + " ms] [" + resourceId + "] Sent read-only data (" + data.level + ") to " + targetUrl + ": It's no longer marked to wait for data");
                 }
                 else {
-                    console.log("[" + duration + " ms] Sent read-only data (" + data.level + ") to " + targetUrl + ": It's still waiting writable data (" + _this._nodeDataRequestLevels[targetUrl] + ")");
+                    console.log("[" + resourceId + "] [" + duration + " ms] [" + resourceId + "] Sent read-only data (" + data.level + ") to " + targetUrl + ": It's still waiting writable data (" + levels[resourceId] + ")");
+                }
+                if (Object.keys(levels).length <= 0) {
+                    delete _this._nodeDataRequestLevels[targetUrl];
                 }
                 // } else if (data.level === DataRequestLevel.READ_ACCESS) {
                 //
@@ -136,11 +147,11 @@ var DLDBServer = /** @class */ (function () {
             }
             if (!_this._serverStateOk && (responseData === null || responseData === void 0 ? void 0 : responseData.status) === DLDBResponseStatus.OK) {
                 _this._serverStateOk = true;
-                console.log("[" + duration + " ms] " + url + " [SUCCESS]: Node state OK");
+                console.log("[" + resourceId + "] [" + duration + " ms] " + url + " [SUCCESS]: Node state OK");
             }
             else {
                 if ((responseData === null || responseData === void 0 ? void 0 : responseData.status) !== DLDBResponseStatus.OK) {
-                    console.log("[" + duration + " ms] " + url + " [SUCCESS]: ", responseData);
+                    console.log("[" + resourceId + "] [" + duration + " ms] " + url + " [SUCCESS]: ", responseData);
                 }
             }
             // Update time averages
@@ -153,69 +164,77 @@ var DLDBServer = /** @class */ (function () {
                 var prevAverageSpeed = _this._nodeAverageSpeed[targetUrl];
                 var newAverageSpeed = _this._nodeAverageSpeed[targetUrl] = prevAverageSpeed + (duration - prevAverageSpeed) / (prevSampleSize + 1);
                 if ("" + Math.round(newAverageSpeed / 100) !== "" + Math.round(prevAverageSpeed / 100)) {
-                    console.log("Node " + targetUrl + " average speed updated as " + newAverageSpeed + " ms (from " + prevAverageSpeed + ")");
+                    console.log("[" + resourceId + "] Node " + targetUrl + " average speed updated as " + newAverageSpeed + " ms (from " + prevAverageSpeed + ")");
                 }
             }
         })["catch"](function (err) {
-            console.error(url + " [FAIL]: ", err);
+            console.error("[" + resourceId + "] " + url + " [FAIL]: ", err);
             _this._serverStateOk = false;
             return Promise.reject(err);
         });
     };
-    DLDBServer.prototype._getTargetsRequestingWriteAccess = function () {
+    DLDBServer.prototype._getTargetsRequestingWriteAccess = function (resourceId) {
         var _this = this;
         return Object.keys(this._nodeDataRequestLevels).filter(function (targetUrl) {
-            var targetLevel = _this._nodeDataRequestLevels[targetUrl];
+            if (!ObjectUtils_1.ObjectUtils.hasProperty(_this._nodeDataRequestLevels[targetUrl], resourceId)) {
+                return false;
+            }
+            var targetLevel = _this._nodeDataRequestLevels[targetUrl][resourceId];
             return targetLevel === DataRequestLevel.WRITE_ACCESS;
         });
     };
-    DLDBServer.prototype._getTargetsRequestingReadAccess = function () {
+    DLDBServer.prototype._getTargetsRequestingReadAccess = function (resourceId) {
         var _this = this;
         return Object.keys(this._nodeDataRequestLevels).filter(function (targetUrl) {
-            var targetLevel = _this._nodeDataRequestLevels[targetUrl];
+            if (!ObjectUtils_1.ObjectUtils.hasProperty(_this._nodeDataRequestLevels[targetUrl], resourceId)) {
+                return false;
+            }
+            var targetLevel = _this._nodeDataRequestLevels[targetUrl][resourceId];
             return targetLevel === DataRequestLevel.READ_ACCESS;
         });
     };
-    DLDBServer.prototype._getTargetsRequestingReadOrWriteAccess = function () {
-        return Object.keys(this._nodeDataRequestLevels);
+    DLDBServer.prototype._getTargetsRequestingReadOrWriteAccess = function (resourceId) {
+        var _this = this;
+        return Object.keys(this._nodeDataRequestLevels).filter(function (targetUrl) {
+            return ObjectUtils_1.ObjectUtils.hasProperty(_this._nodeDataRequestLevels[targetUrl], resourceId);
+        });
     };
-    DLDBServer.prototype._getNextTargetByRequest = function (level, targets) {
+    DLDBServer.prototype._getNextTargetByRequest = function (level, targets, resourceId) {
         if (level === DataRequestLevel.WRITE_ACCESS) {
-            var targetsWantingWriteAccess = this._getTargetsRequestingWriteAccess();
+            var targetsWantingWriteAccess = this._getTargetsRequestingWriteAccess(resourceId);
             if (targetsWantingWriteAccess.length) {
-                var target_1 = DLDBServer._getNextTargetByRandom(targetsWantingWriteAccess);
-                console.log(targetsWantingWriteAccess.length + " nodes requested write access, picked: " + target_1 + (targetsWantingWriteAccess.length >= 2 ? ' by random' : ''));
-                return target_1;
+                var target = DLDBServer._getNextTargetByRandom(targetsWantingWriteAccess);
+                console.log("[" + resourceId + "] " + targetsWantingWriteAccess.length + " nodes requested write access, picked: " + target + (targetsWantingWriteAccess.length >= 2 ? ' by random' : ''));
+                return target;
             }
         }
-        var targetsWantingAnyAccess = this._getTargetsRequestingReadOrWriteAccess();
+        var targetsWantingAnyAccess = this._getTargetsRequestingReadOrWriteAccess(resourceId);
         if (targetsWantingAnyAccess.length) {
-            var target_2 = DLDBServer._getNextTargetByRandom(targetsWantingAnyAccess);
-            console.log(targetsWantingAnyAccess.length + " nodes requested read access, picked: " + target_2 + (targetsWantingAnyAccess.length >= 2 ? ' by random' : ''));
-            return target_2;
+            var target = DLDBServer._getNextTargetByRandom(targetsWantingAnyAccess);
+            console.log("[" + resourceId + "] " + targetsWantingAnyAccess.length + " nodes requested read access, picked: " + target + (targetsWantingAnyAccess.length >= 2 ? ' by random' : ''));
+            return target;
         }
         if (targets.length === 1) {
             return targets[0];
         }
-        var target = this._getSlowestTarget(targets);
-        //console.log(`Picked next target ${target} by random.`);
-        return target;
+        return this._getSlowestTarget(targets);
     };
     /**
      * Send processed data to node(s)
      *
      * @param data
      * @param targets
+     * @param resourceId
      */
-    DLDBServer.prototype.sendDataToOneOfTargets = function (data, targets) {
+    DLDBServer.prototype.sendDataToOneOfTargets = function (data, targets, resourceId) {
         var _this = this;
         if (!DLDBServer._isIncomingDataObject(data)) {
-            throw new TypeError('Cannot send invalid data object');
+            throw new TypeError('[' + resourceId + '] Cannot send invalid data object');
         }
-        var targetUrl = this._getNextTargetByRequest(data.level, targets);
-        this.sendDataToSingleTarget(data, targetUrl)["catch"](function () {
+        var targetUrl = this._getNextTargetByRequest(data.level, targets, resourceId);
+        this.sendDataToSingleTarget(data, targetUrl, resourceId)["catch"](function () {
             if (data.level === DataRequestLevel.WRITE_ACCESS) {
-                _this.sendDataToOneOfTargets(data, targets);
+                _this.sendDataToOneOfTargets(data, targets, resourceId);
             }
         });
         return targetUrl;
@@ -225,14 +244,16 @@ var DLDBServer = /** @class */ (function () {
      *
      * @param level
      * @param targets
+     * @param resourceId
+     * @param secret
      */
-    DLDBServer.sendDataRequest = function (level, targets) {
+    DLDBServer.sendDataRequest = function (level, targets, resourceId, secret) {
         targets.forEach(function (targetUrl) {
-            var url = "" + targetUrl + RoutePath_1["default"].INCOMING_DATA_REQUEST;
-            HttpUtils_1["default"].request(HttpUtils_1.HttpMethod.POST, url, { from: Environment_1.DLDB_PUBLIC_URL, level: level }).then(function (data) {
-                console.log(url + " [SUCCESS]: ", data.status);
+            var url = "" + targetUrl + RoutePath_1["default"].INCOMING_DATA_REQUEST + "/" + resourceId;
+            HttpUtils_1["default"].request(HttpUtils_1.HttpMethod.POST, url, { secret: secret, from: Environment_1.DLDB_PUBLIC_URL, level: level }).then(function (data) {
+                console.log("[" + resourceId + "] " + url + " [SUCCESS]: ", data.status);
             })["catch"](function (err) {
-                console.error(url + " [FAIL]: ", err);
+                console.error("[" + resourceId + "] " + url + " [FAIL]: ", err);
             });
         });
     };
@@ -243,19 +264,23 @@ var DLDBServer = /** @class */ (function () {
      *
      * Returns the updated data.
      */
-    DLDBServer.prototype.processIncomingDataPayload = function (level, data) {
+    DLDBServer.prototype.processIncomingDataPayload = function (level, data, resourceId) {
         var newData = data;
+        var postQueue = this._postQueue.filter(function (item) { return item.id === resourceId; });
+        var getQueue = this._getQueue.filter(function (item) { return item.id === resourceId; });
+        this._postQueue = this._postQueue.filter(function (item) { return item.id !== resourceId; });
+        this._getQueue = this._getQueue.filter(function (item) { return item.id !== resourceId; });
         if (level === DataRequestLevel.WRITE_ACCESS) {
-            while (this._postQueue.length) {
-                var item = this._postQueue.shift();
+            while (postQueue.length) {
+                var item = postQueue.shift();
                 var oldData = data;
                 newData = __assign(__assign({}, data), item.input);
-                console.log('DLDB state changed from ', oldData, ' to ', newData, ' with ', item.input);
-                this._getQueue.push(item);
+                console.log("[" + resourceId + "] DLDB state changed from ", oldData, ' to ', newData, ' with ', item.input);
+                getQueue.push(item);
             }
         }
-        while (this._getQueue.length) {
-            var item = this._getQueue.shift();
+        while (getQueue.length) {
+            var item = getQueue.shift();
             HttpUtils_1["default"].jsonResponse(item.res, 200, { payload: newData });
         }
         return newData;
@@ -268,19 +293,22 @@ var DLDBServer = /** @class */ (function () {
      * @param method
      * @param req
      * @param res
+     * @param resourceId
      */
-    DLDBServer.prototype.delayedDataRequest = function (method, req, res) {
+    DLDBServer.prototype.delayedDataRequest = function (method, req, res, resourceId) {
         var _this = this;
         // Append the request to queues
         switch (method) {
             case HttpUtils_1.HttpMethod.GET:
-                this._getQueue.push({ res: res });
-                DLDBServer.sendDataRequest(DataRequestLevel.READ_ACCESS, Environment_1.DLDB_NODES);
+                this._getQueue.push({ res: res, id: resourceId });
+                DLDBServer.sendDataRequest(DataRequestLevel.READ_ACCESS, Environment_1.DLDB_NODES, resourceId, Environment_1.DLDB_REQUEST_SECRET);
+                this._clearTimeout(resourceId);
                 break;
             case HttpUtils_1.HttpMethod.POST:
                 HttpUtils_1["default"].parseResponseJson(req).then(function (data) {
-                    _this._postQueue.push({ res: res, input: data });
-                    DLDBServer.sendDataRequest(DataRequestLevel.WRITE_ACCESS, Environment_1.DLDB_NODES);
+                    _this._postQueue.push({ res: res, input: data, id: resourceId });
+                    DLDBServer.sendDataRequest(DataRequestLevel.WRITE_ACCESS, Environment_1.DLDB_NODES, resourceId, Environment_1.DLDB_REQUEST_SECRET);
+                    _this._clearTimeout(resourceId);
                 })["catch"](function (err) { return DLDBServer.processBadRequestParseErrorResponse(res, err); });
                 break;
             default:
@@ -290,7 +318,7 @@ var DLDBServer = /** @class */ (function () {
     /**
      * Process incoming data
      */
-    DLDBServer.prototype.processIncomingData = function (res, data) {
+    DLDBServer.prototype.processIncomingData = function (res, data, resourceId) {
         var _this = this;
         var _a;
         var passphrase = data.secret;
@@ -305,27 +333,32 @@ var DLDBServer = /** @class */ (function () {
         }
         // Clear the data request state since clearly the packet just came from there
         if (ObjectUtils_1.ObjectUtils.hasProperty(this._nodeDataRequestLevels, from)) {
-            if (data.level === DataRequestLevel.WRITE_ACCESS) {
-                delete this._nodeDataRequestLevels[from];
-                console.log(from + " no longer marked to want data, since we received writable data from there.");
-            }
-            if (data.level === DataRequestLevel.READ_ACCESS && this._nodeDataRequestLevels[from] === DataRequestLevel.READ_ACCESS) {
-                delete this._nodeDataRequestLevels[from];
-                console.log(from + " no longer marked to want data, since we received read only data from there.");
+            if (ObjectUtils_1.ObjectUtils.hasProperty(this._nodeDataRequestLevels[from], resourceId)) {
+                if (data.level === DataRequestLevel.WRITE_ACCESS) {
+                    delete this._nodeDataRequestLevels[from][resourceId];
+                    console.log(from + " no longer marked to want data, since we received writable data from there.");
+                }
+                if (data.level === DataRequestLevel.READ_ACCESS && this._nodeDataRequestLevels[from][resourceId] === DataRequestLevel.READ_ACCESS) {
+                    delete this._nodeDataRequestLevels[from][resourceId];
+                    console.log(from + " no longer marked to want data, since we received read only data from there.");
+                }
+                if (Object.keys(this._nodeDataRequestLevels[from]).length <= 0) {
+                    delete this._nodeDataRequestLevels[from];
+                }
             }
         }
         var payload = (_a = data.payload) !== null && _a !== void 0 ? _a : {};
-        var newData = this.processIncomingDataPayload(data.level, payload);
+        var newData = this.processIncomingDataPayload(data.level, payload, resourceId);
         HttpUtils_1["default"].jsonResponse(res, 200, { status: DLDBResponseStatus.OK });
         if (data.level === DataRequestLevel.WRITE_ACCESS) {
-            if (this._getTargetsRequestingReadOrWriteAccess().length) {
+            if (this._getTargetsRequestingReadOrWriteAccess(resourceId).length) {
                 var writeTarget_1 = this.sendDataToOneOfTargets({
                     from: Environment_1.DLDB_PUBLIC_URL,
                     secret: passphrase,
                     level: DataRequestLevel.WRITE_ACCESS,
                     payload: newData
-                }, Environment_1.DLDB_NODES);
-                var readOnlyTargets = this._getTargetsRequestingReadAccess().filter(function (item) { return item !== writeTarget_1; });
+                }, Environment_1.DLDB_NODES, resourceId);
+                var readOnlyTargets = this._getTargetsRequestingReadAccess(resourceId).filter(function (item) { return item !== writeTarget_1; });
                 if (readOnlyTargets.length) {
                     readOnlyTargets.forEach(function (readTarget) {
                         _this.sendDataToOneOfTargets({
@@ -333,27 +366,46 @@ var DLDBServer = /** @class */ (function () {
                             secret: passphrase,
                             level: DataRequestLevel.READ_ACCESS,
                             payload: newData
-                        }, [readTarget]);
+                        }, [readTarget], resourceId);
                     });
                 }
             }
             else {
-                setTimeout(function () {
+                this._clearTimeout(resourceId);
+                this._timeoutCallback[resourceId] = function () {
+                    delete _this._timeout[resourceId];
+                    delete _this._timeoutCallback[resourceId];
                     _this.sendDataToOneOfTargets({
                         from: Environment_1.DLDB_PUBLIC_URL,
                         secret: passphrase,
                         level: DataRequestLevel.WRITE_ACCESS,
                         payload: newData
-                    }, Environment_1.DLDB_NODES);
-                }, Environment_1.DLDB_SEND_DELAY);
+                    }, Environment_1.DLDB_NODES, resourceId);
+                };
+                this._timeout[resourceId] = setTimeout(this._timeoutCallback[resourceId], Environment_1.DLDB_SEND_DELAY);
             }
+        }
+    };
+    DLDBServer.prototype._clearTimeout = function (resourceId) {
+        if (ObjectUtils_1.ObjectUtils.hasProperty(this._timeout, resourceId)) {
+            clearTimeout(this._timeout[resourceId]);
+            delete this._timeout[resourceId];
+        }
+        if (ObjectUtils_1.ObjectUtils.hasProperty(this._timeoutCallback, resourceId)) {
+            this._timeoutCallback[resourceId]();
+            delete this._timeoutCallback[resourceId];
         }
     };
     /**
      * Process request for incoming data
      */
-    DLDBServer.prototype.processIncomingDataRequest = function (res, data) {
-        // FIXME: Implement a security check to validate where the request originated
+    DLDBServer.prototype.processIncomingDataRequest = function (res, data, resourceId) {
+        var _a;
+        var passphrase = data === null || data === void 0 ? void 0 : data.secret;
+        if (!passphrase || (passphrase !== Environment_1.DLDB_REQUEST_SECRET)) {
+            HttpUtils_1["default"].errorResponse(res, 403, 'Access Denied', { status: DLDBResponseStatus.ERROR });
+            return;
+        }
         var from = data.from;
         if (!Environment_1.DLDB_NODES.some(function (item) { return item === from; })) {
             return DLDBServer.processBadRequestInvalidObjectContentResponse(res);
@@ -361,24 +413,29 @@ var DLDBServer = /** @class */ (function () {
         var level = data.level;
         var changed = false;
         if (ObjectUtils_1.ObjectUtils.hasProperty(this._nodeDataRequestLevels, from)) {
-            if (level > this._nodeDataRequestLevels[from]) {
-                this._nodeDataRequestLevels[from] = level;
-                changed = true;
-                console.log(from + " is waiting for writable data (" + level + ") now");
+            if (ObjectUtils_1.ObjectUtils.hasProperty(this._nodeDataRequestLevels[from], resourceId)) {
+                if (level > this._nodeDataRequestLevels[from][resourceId]) {
+                    this._nodeDataRequestLevels[from][resourceId] = level;
+                    changed = true;
+                    console.log("[" + resourceId + "] " + from + " is waiting for writable data (" + level + ") now");
+                }
             }
         }
         else {
-            this._nodeDataRequestLevels[from] = level;
+            this._nodeDataRequestLevels[from] = (_a = {}, _a[resourceId] = level, _a);
             changed = true;
             if (level === DataRequestLevel.WRITE_ACCESS) {
-                console.log(from + " is waiting for writable data (" + level + ") now");
+                console.log("[" + resourceId + "] " + from + " is waiting for writable data (" + level + ") now");
             }
             else {
-                console.log(from + " is waiting for read-only data (" + level + ") now");
+                console.log("[" + resourceId + "] " + from + " is waiting for read-only data (" + level + ") now");
             }
         }
         if (!changed) {
-            console.warn(from + " notified us, but we knew it already.");
+            console.warn("[" + resourceId + "] " + from + " notified us, but we knew it already.");
+        }
+        else {
+            this._clearTimeout(resourceId);
         }
         HttpUtils_1["default"].jsonResponse(res, 200, { status: DLDBResponseStatus.OK, changed: changed });
     };
@@ -393,35 +450,56 @@ var DLDBServer = /** @class */ (function () {
         try {
             var url = req.url;
             var method = HttpUtils_1["default"].parseHttpMethod(req.method);
-            switch (url) {
-                case RoutePath_1["default"].INCOMING_DATA:
+            // Handles incoming data
+            if (url.startsWith(RoutePath_1["default"].INCOMING_DATA + '/')) {
+                var resourceId_1 = DLDBServer.parseResourceId(url, RoutePath_1["default"].INCOMING_DATA + '/');
+                if (resourceId_1) {
                     HttpUtils_1["default"].parseResponseJson(req).then(function (data) {
                         if (DLDBServer._isIncomingDataObject(data)) {
-                            _this.processIncomingData(res, data);
+                            _this.processIncomingData(res, data, resourceId_1);
                         }
                         else {
                             DLDBServer.processBadRequestInvalidObjectResponse(res);
-                            console.log('Invalid Object: ', data);
+                            console.log("[" + resourceId_1 + "] Invalid Object: ", data);
                         }
                     })["catch"](function (err) { return DLDBServer.processBadRequestParseErrorResponse(res, err); });
-                    break;
-                case RoutePath_1["default"].INCOMING_DATA_REQUEST:
+                }
+                else {
+                    DLDBServer.processNotFoundResponse(res);
+                }
+                return;
+            }
+            // Handles requests for data to other nodes
+            if (url.startsWith(RoutePath_1["default"].INCOMING_DATA_REQUEST + '/')) {
+                var resourceId_2 = DLDBServer.parseResourceId(url, RoutePath_1["default"].INCOMING_DATA_REQUEST + '/');
+                if (resourceId_2) {
                     HttpUtils_1["default"].parseResponseJson(req).then(function (data) {
                         if (DLDBServer._isIncomingDataRequestObject(data)) {
-                            _this.processIncomingDataRequest(res, data);
+                            _this.processIncomingDataRequest(res, data, resourceId_2);
                         }
                         else {
                             DLDBServer.processBadRequestInvalidObjectResponse(res);
-                            console.log('Invalid Object: ', data);
+                            console.log("[" + resourceId_2 + "] Invalid Object: ", data);
                         }
                     })["catch"](function (err) { return DLDBServer.processBadRequestParseErrorResponse(res, err); });
-                    break;
-                case RoutePath_1["default"].DELAYED_DATA_REQUEST:
-                    this.delayedDataRequest(method, req, res);
-                    break;
-                default:
+                }
+                else {
                     DLDBServer.processNotFoundResponse(res);
+                }
+                return;
             }
+            // Handles data requests from users
+            if (url.startsWith(RoutePath_1["default"].DELAYED_DATA_REQUEST)) {
+                var resourceId = DLDBServer.parseResourceId(url, RoutePath_1["default"].DELAYED_DATA_REQUEST);
+                if (resourceId) {
+                    this.delayedDataRequest(method, req, res, resourceId);
+                }
+                else {
+                    DLDBServer.processNotFoundResponse(res);
+                }
+                return;
+            }
+            DLDBServer.processNotFoundResponse(res);
         }
         catch (err) {
             DLDBServer.processInternalErrorResponse(res, err);
@@ -443,6 +521,30 @@ var DLDBServer = /** @class */ (function () {
     };
     DLDBServer.processBadRequestInvalidObjectContentResponse = function (res) {
         HttpUtils_1["default"].errorResponse(res, 400, 'Bad Request: Invalid Object Content', { status: DLDBResponseStatus.ERROR });
+    };
+    DLDBServer.parseResourceId = function (url, prefix) {
+        if (!url) {
+            return undefined;
+        }
+        if (typeof url !== 'string') {
+            return undefined;
+        }
+        url = url.substr(prefix.length);
+        if (!url) {
+            return undefined;
+        }
+        var parts = url.split('/');
+        if (parts.length <= 0) {
+            return undefined;
+        }
+        var id = parts.shift();
+        if (!this.checkUuid(id)) {
+            return undefined;
+        }
+        return id.toLowerCase();
+    };
+    DLDBServer.checkUuid = function (value) {
+        return /^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$/.test(value);
     };
     return DLDBServer;
 }());

@@ -1,7 +1,7 @@
 {
   "name": "dldb",
-  "version": "0.2.0",
-  "description": "Delay Line Memory Database",
+  "version": "0.3.0",
+  "description": "Cloud Delay Line Memory Database",
   "main": "dist/index.js",
   "bin": {
     "dldbd": "./dist/server.js"

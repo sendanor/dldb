@@ -23,6 +23,11 @@ export const DLDB_NODES    : Array<string> | undefined = (process?.env?.DLDB_NOD
 export const DLDB_INCOMING_SECRET : string = process?.env?.DLDB_INCOMING_SECRET ?? '';
 
 /**
+ * Secret which you must know to direct traffic to nodes.
+ */
+export const DLDB_REQUEST_SECRET : string = process?.env?.DLDB_REQUEST_SECRET ?? '';
+
+/**
  * The minimum network delay in ms to take into account when choosing where to send a package.
  *
  * If it is less than this value, the destination will be random.

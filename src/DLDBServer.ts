@@ -167,7 +167,7 @@ export class DLDBServer {
 
         sortedTargets = sortedTargets.filter((item: string) : boolean => {
 
-            let averageA = ObjectUtils.hasProperty(this._nodeAverageSpeed, item) ? this._nodeAverageSpeed[item] : 9999;
+            let averageA = ObjectUtils.hasProperty(this._nodeAverageSpeed, item) ? this._nodeAverageSpeed[item] : 0;
 
             return averageA >= DLDB_MINIMUM_NETWORK_DELAY;
 
@@ -179,8 +179,8 @@ export class DLDBServer {
 
         sortedTargets.sort((aTarget : string, bTarget : string) : number => {
 
-            let averageA = ObjectUtils.hasProperty(this._nodeAverageSpeed, aTarget) ? this._nodeAverageSpeed[aTarget] : 9999;
-            let averageB = ObjectUtils.hasProperty(this._nodeAverageSpeed, bTarget) ? this._nodeAverageSpeed[bTarget] : 9999;
+            let averageA = ObjectUtils.hasProperty(this._nodeAverageSpeed, aTarget) ? this._nodeAverageSpeed[aTarget] : 0;
+            let averageB = ObjectUtils.hasProperty(this._nodeAverageSpeed, bTarget) ? this._nodeAverageSpeed[bTarget] : 0;
 
             if (averageA < DLDB_MINIMUM_NETWORK_DELAY) {
                 averageA = DLDB_MINIMUM_NETWORK_DELAY;
@@ -199,16 +199,16 @@ export class DLDBServer {
         });
 
         // console.log( 'SORTED: ' + sortedTargets.map(item => {
-        //     const speed = ObjectUtils.hasProperty(this._nodeAverageSpeed, item) ? this._nodeAverageSpeed[item] : 9999;
+        //     const speed = ObjectUtils.hasProperty(this._nodeAverageSpeed, item) ? this._nodeAverageSpeed[item] : 0;
         //     return `${item} with ${speed} ms`;
         // }).join(', ') );
 
         const firstTarget = sortedTargets[ 0 ];
-        const firstAverage = `${Math.round(ObjectUtils.hasProperty(this._nodeAverageSpeed, firstTarget) ? this._nodeAverageSpeed[firstTarget] : 9999)}`;
+        const firstAverage = `${Math.round(ObjectUtils.hasProperty(this._nodeAverageSpeed, firstTarget) ? this._nodeAverageSpeed[firstTarget] : 0)}`;
 
         const identicalTargets = sortedTargets.filter(item => {
 
-            const itemAverage = `${Math.round(ObjectUtils.hasProperty(this._nodeAverageSpeed, item) ? this._nodeAverageSpeed[item] : 9999)}`;
+            const itemAverage = `${Math.round(ObjectUtils.hasProperty(this._nodeAverageSpeed, item) ? this._nodeAverageSpeed[item] : 0)}`;
 
             return firstAverage === itemAverage;
 
@@ -316,7 +316,7 @@ export class DLDBServer {
 
             this._serverStateOk = false;
 
-            return Promise.reject(err);
+            return Promise.reject(targetUrl);
 
         });
 
@@ -417,9 +417,17 @@ export class DLDBServer {
 
         let targetUrl = this._getNextTargetByRequest(data.level, targets, resourceId);
 
-        this.sendDataToSingleTarget(data, targetUrl, resourceId).catch( () => {
+        this.sendDataToSingleTarget(data, targetUrl, resourceId).catch( (failedTarget : string) => {
 
             if (data.level === DataRequestLevel.WRITE_ACCESS) {
+
+                if (ObjectUtils.hasProperty(this._nodeAverageSpeed, failedTarget)) {
+                    delete this._nodeAverageSpeed[failedTarget];
+                }
+
+                if (ObjectUtils.hasProperty(this._nodeAverageSampleSize, failedTarget)) {
+                    delete this._nodeAverageSampleSize[failedTarget];
+                }
 
                 this.sendDataToOneOfTargets(data, targets, resourceId);
 

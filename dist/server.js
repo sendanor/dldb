@@ -11,13 +11,14 @@ if (!Environment_1.DLDB_REQUEST_SECRET) {
 }
 else {
     var CLOSING_STATE_1 = false;
-    var DLDB = new DLDBServer_1["default"]();
-    var SERVER_1 = HTTP.createServer(DLDB.preProcessRequest.bind(DLDB));
+    var DLDB_1 = new DLDBServer_1["default"]();
+    var SERVER_1 = HTTP.createServer(DLDB_1.preProcessRequest.bind(DLDB_1));
     var closeProcess = function () {
         if (CLOSING_STATE_1 === false) {
             console.info('DLDB node shutdown requested.');
             CLOSING_STATE_1 = true;
         }
+        DLDB_1.close();
         SERVER_1.close();
     };
     if (Environment_1.DLDB_NODES.length <= 0) {

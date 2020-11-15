@@ -75,15 +75,15 @@ var DLDBServer = /** @class */ (function () {
         var _this = this;
         var sortedTargets = [].concat(targets);
         sortedTargets = sortedTargets.filter(function (item) {
-            var averageA = ObjectUtils_1.ObjectUtils.hasProperty(_this._nodeAverageSpeed, item) ? _this._nodeAverageSpeed[item] : 9999;
+            var averageA = ObjectUtils_1.ObjectUtils.hasProperty(_this._nodeAverageSpeed, item) ? _this._nodeAverageSpeed[item] : 0;
             return averageA >= Environment_1.DLDB_MINIMUM_NETWORK_DELAY;
         });
         if (!sortedTargets.length) {
             return DLDBServer._getNextTargetByRandom(targets);
         }
         sortedTargets.sort(function (aTarget, bTarget) {
-            var averageA = ObjectUtils_1.ObjectUtils.hasProperty(_this._nodeAverageSpeed, aTarget) ? _this._nodeAverageSpeed[aTarget] : 9999;
-            var averageB = ObjectUtils_1.ObjectUtils.hasProperty(_this._nodeAverageSpeed, bTarget) ? _this._nodeAverageSpeed[bTarget] : 9999;
+            var averageA = ObjectUtils_1.ObjectUtils.hasProperty(_this._nodeAverageSpeed, aTarget) ? _this._nodeAverageSpeed[aTarget] : 0;
+            var averageB = ObjectUtils_1.ObjectUtils.hasProperty(_this._nodeAverageSpeed, bTarget) ? _this._nodeAverageSpeed[bTarget] : 0;
             if (averageA < Environment_1.DLDB_MINIMUM_NETWORK_DELAY) {
                 averageA = Environment_1.DLDB_MINIMUM_NETWORK_DELAY;
             }
@@ -96,13 +96,13 @@ var DLDBServer = /** @class */ (function () {
             return averageA < averageB ? 1 : -1;
         });
         // console.log( 'SORTED: ' + sortedTargets.map(item => {
-        //     const speed = ObjectUtils.hasProperty(this._nodeAverageSpeed, item) ? this._nodeAverageSpeed[item] : 9999;
+        //     const speed = ObjectUtils.hasProperty(this._nodeAverageSpeed, item) ? this._nodeAverageSpeed[item] : 0;
         //     return `${item} with ${speed} ms`;
         // }).join(', ') );
         var firstTarget = sortedTargets[0];
-        var firstAverage = "" + Math.round(ObjectUtils_1.ObjectUtils.hasProperty(this._nodeAverageSpeed, firstTarget) ? this._nodeAverageSpeed[firstTarget] : 9999);
+        var firstAverage = "" + Math.round(ObjectUtils_1.ObjectUtils.hasProperty(this._nodeAverageSpeed, firstTarget) ? this._nodeAverageSpeed[firstTarget] : 0);
         var identicalTargets = sortedTargets.filter(function (item) {
-            var itemAverage = "" + Math.round(ObjectUtils_1.ObjectUtils.hasProperty(_this._nodeAverageSpeed, item) ? _this._nodeAverageSpeed[item] : 9999);
+            var itemAverage = "" + Math.round(ObjectUtils_1.ObjectUtils.hasProperty(_this._nodeAverageSpeed, item) ? _this._nodeAverageSpeed[item] : 0);
             return firstAverage === itemAverage;
         });
         if (identicalTargets.length >= 2) {
@@ -170,7 +170,7 @@ var DLDBServer = /** @class */ (function () {
         })["catch"](function (err) {
             console.error("[" + resourceId + "] " + url + " [FAIL]: ", err);
             _this._serverStateOk = false;
-            return Promise.reject(err);
+            return Promise.reject(targetUrl);
         });
     };
     DLDBServer.prototype._getTargetsRequestingWriteAccess = function (resourceId) {
@@ -232,8 +232,14 @@ var DLDBServer = /** @class */ (function () {
             throw new TypeError('[' + resourceId + '] Cannot send invalid data object');
         }
         var targetUrl = this._getNextTargetByRequest(data.level, targets, resourceId);
-        this.sendDataToSingleTarget(data, targetUrl, resourceId)["catch"](function () {
+        this.sendDataToSingleTarget(data, targetUrl, resourceId)["catch"](function (failedTarget) {
             if (data.level === DataRequestLevel.WRITE_ACCESS) {
+                if (ObjectUtils_1.ObjectUtils.hasProperty(_this._nodeAverageSpeed, failedTarget)) {
+                    delete _this._nodeAverageSpeed[failedTarget];
+                }
+                if (ObjectUtils_1.ObjectUtils.hasProperty(_this._nodeAverageSampleSize, failedTarget)) {
+                    delete _this._nodeAverageSampleSize[failedTarget];
+                }
                 _this.sendDataToOneOfTargets(data, targets, resourceId);
             }
         });
@@ -545,6 +551,14 @@ var DLDBServer = /** @class */ (function () {
     };
     DLDBServer.checkUuid = function (value) {
         return /^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$/.test(value);
+    };
+    DLDBServer.prototype.close = function () {
+        var _this = this;
+        Object.keys(this._timeout).forEach(function (targetUrl) {
+            Object.keys(_this._timeout[targetUrl]).forEach(function (resourceId) {
+                _this._clearTimeout(resourceId);
+            });
+        });
     };
     return DLDBServer;
 }());

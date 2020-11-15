@@ -58,7 +58,7 @@ DLDB_NODES='http://localhost:3000' \
 npm start
 ```
 
-### Start database loop
+### Start database loop for resource 74766E7B-D41A-4A95-8C01-A28213B0C84A
 
 ```
 $ curl -i -X POST 'http://localhost:3000/d/74766E7B-D41A-4A95-8C01-A28213B0C84A' -d '{"secret": "Secret1234", "payload":{"hello":"world"}, "level": 1, "from": "http://localhost:3001"}'
@@ -73,6 +73,8 @@ Content-Length: 20
   "status": "OK"
 }
 ```
+
+You should not start it multiple times :)
 
 ### Read database record
 

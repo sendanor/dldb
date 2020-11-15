@@ -38,6 +38,8 @@ if (!DLDB_REQUEST_SECRET) {
 
         }
 
+        DLDB.close();
+
         SERVER.close();
 
     };

@@ -915,6 +915,16 @@ export class DLDBServer {
         return /^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$/.test(value);
     }
 
+    public close () {
+
+        Object.keys(this._timeout).forEach(targetUrl => {
+            Object.keys(this._timeout[targetUrl]).forEach(resourceId => {
+                this._clearTimeout(resourceId);
+            });
+        });
+
+    }
+
 }
 
 export default DLDBServer;

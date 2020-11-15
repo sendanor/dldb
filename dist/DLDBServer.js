@@ -33,6 +33,8 @@ var DLDBServer = /** @class */ (function () {
         this._getQueue = [];
         this._postQueue = [];
         this._nodeDataRequestLevels = {};
+        this._nodeAverageSpeed = {};
+        this._nodeAverageSampleSize = {};
     }
     DLDBServer._parseDataRequestLevel = function (value) {
         switch (value) {
@@ -64,6 +66,45 @@ var DLDBServer = /** @class */ (function () {
         // FIXME: Change to use crypto module
         return targets[this._getTargetByRandom(targets.length)];
     };
+    DLDBServer.prototype._getSlowestTarget = function (targets) {
+        var _this = this;
+        var sortedTargets = [].concat(targets);
+        sortedTargets = sortedTargets.filter(function (item) {
+            var averageA = ObjectUtils_1.ObjectUtils.hasProperty(_this._nodeAverageSpeed, item) ? _this._nodeAverageSpeed[item] : 9999;
+            return averageA >= Environment_1.DLDB_MINIMUM_NETWORK_DELAY;
+        });
+        if (!sortedTargets.length) {
+            return DLDBServer._getNextTargetByRandom(targets);
+        }
+        sortedTargets.sort(function (aTarget, bTarget) {
+            var averageA = ObjectUtils_1.ObjectUtils.hasProperty(_this._nodeAverageSpeed, aTarget) ? _this._nodeAverageSpeed[aTarget] : 9999;
+            var averageB = ObjectUtils_1.ObjectUtils.hasProperty(_this._nodeAverageSpeed, bTarget) ? _this._nodeAverageSpeed[bTarget] : 9999;
+            if (averageA < Environment_1.DLDB_MINIMUM_NETWORK_DELAY) {
+                averageA = Environment_1.DLDB_MINIMUM_NETWORK_DELAY;
+            }
+            if (averageB < Environment_1.DLDB_MINIMUM_NETWORK_DELAY) {
+                averageB = Environment_1.DLDB_MINIMUM_NETWORK_DELAY;
+            }
+            if (averageA === averageB) {
+                return 0;
+            }
+            return averageA < averageB ? 1 : -1;
+        });
+        // console.log( 'SORTED: ' + sortedTargets.map(item => {
+        //     const speed = ObjectUtils.hasProperty(this._nodeAverageSpeed, item) ? this._nodeAverageSpeed[item] : 9999;
+        //     return `${item} with ${speed} ms`;
+        // }).join(', ') );
+        var firstTarget = sortedTargets[0];
+        var firstAverage = "" + Math.round(ObjectUtils_1.ObjectUtils.hasProperty(this._nodeAverageSpeed, firstTarget) ? this._nodeAverageSpeed[firstTarget] : 9999);
+        var identicalTargets = sortedTargets.filter(function (item) {
+            var itemAverage = "" + Math.round(ObjectUtils_1.ObjectUtils.hasProperty(_this._nodeAverageSpeed, item) ? _this._nodeAverageSpeed[item] : 9999);
+            return firstAverage === itemAverage;
+        });
+        if (identicalTargets.length >= 2) {
+            return DLDBServer._getNextTargetByRandom(identicalTargets);
+        }
+        return sortedTargets[0];
+    };
     /**
      * Send processed data to node(s)
      *
@@ -72,19 +113,22 @@ var DLDBServer = /** @class */ (function () {
      */
     DLDBServer.prototype.sendDataToSingleTarget = function (data, targetUrl) {
         var _this = this;
+        var startTime = Date.now();
         var url = "" + targetUrl + RoutePath_1["default"].INCOMING_DATA;
         return HttpUtils_1["default"].request(HttpUtils_1.HttpMethod.POST, url, data).then(function (responseData) {
+            var endTime = Date.now();
+            var duration = endTime - startTime;
             if (ObjectUtils_1.ObjectUtils.hasProperty(_this._nodeDataRequestLevels, targetUrl)) {
                 if (data.level === DataRequestLevel.WRITE_ACCESS) {
                     delete _this._nodeDataRequestLevels[targetUrl];
-                    console.log("Sent writable data to " + targetUrl + ": It's no longer marked to wait for data");
+                    console.log("[" + duration + " ms] Sent writable data to " + targetUrl + ": It's no longer marked to wait for data");
                 }
                 else if (_this._nodeDataRequestLevels[targetUrl] === DataRequestLevel.READ_ACCESS) {
                     delete _this._nodeDataRequestLevels[targetUrl];
-                    console.log("Sent read-only data (" + data.level + ") to " + targetUrl + ": It's no longer marked to wait for data");
+                    console.log("[" + duration + " ms] Sent read-only data (" + data.level + ") to " + targetUrl + ": It's no longer marked to wait for data");
                 }
                 else {
-                    console.log("Sent read-only data (" + data.level + ") to " + targetUrl + ": It's still waiting writable data (" + _this._nodeDataRequestLevels[targetUrl] + ")");
+                    console.log("[" + duration + " ms] Sent read-only data (" + data.level + ") to " + targetUrl + ": It's still waiting writable data (" + _this._nodeDataRequestLevels[targetUrl] + ")");
                 }
                 // } else if (data.level === DataRequestLevel.READ_ACCESS) {
                 //
@@ -92,11 +136,24 @@ var DLDBServer = /** @class */ (function () {
             }
             if (!_this._serverStateOk && (responseData === null || responseData === void 0 ? void 0 : responseData.status) === DLDBResponseStatus.OK) {
                 _this._serverStateOk = true;
-                console.log(url + " [SUCCESS]: Node state OK");
+                console.log("[" + duration + " ms] " + url + " [SUCCESS]: Node state OK");
             }
             else {
                 if ((responseData === null || responseData === void 0 ? void 0 : responseData.status) !== DLDBResponseStatus.OK) {
-                    console.log(url + " [SUCCESS]: ", responseData);
+                    console.log("[" + duration + " ms] " + url + " [SUCCESS]: ", responseData);
+                }
+            }
+            // Update time averages
+            if (!ObjectUtils_1.ObjectUtils.hasProperty(_this._nodeAverageSampleSize, targetUrl)) {
+                _this._nodeAverageSampleSize[targetUrl] = 1;
+                _this._nodeAverageSpeed[targetUrl] = duration;
+            }
+            else {
+                var prevSampleSize = _this._nodeAverageSampleSize[targetUrl];
+                var prevAverageSpeed = _this._nodeAverageSpeed[targetUrl];
+                var newAverageSpeed = _this._nodeAverageSpeed[targetUrl] = prevAverageSpeed + (duration - prevAverageSpeed) / (prevSampleSize + 1);
+                if ("" + Math.round(newAverageSpeed / 100) !== "" + Math.round(prevAverageSpeed / 100)) {
+                    console.log("Node " + targetUrl + " average speed updated as " + newAverageSpeed + " ms (from " + prevAverageSpeed + ")");
                 }
             }
         })["catch"](function (err) {
@@ -140,7 +197,7 @@ var DLDBServer = /** @class */ (function () {
         if (targets.length === 1) {
             return targets[0];
         }
-        var target = DLDBServer._getNextTargetByRandom(targets);
+        var target = this._getSlowestTarget(targets);
         //console.log(`Picked next target ${target} by random.`);
         return target;
     };

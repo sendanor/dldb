@@ -23,6 +23,13 @@ export const DLDB_NODES    : Array<string> | undefined = (process?.env?.DLDB_NOD
 export const DLDB_INCOMING_SECRET : string = process?.env?.DLDB_INCOMING_SECRET ?? '';
 
 /**
+ * The minimum network delay in ms to take into account when choosing where to send a package.
+ *
+ * If it is less than this value, the destination will be random.
+ */
+export const DLDB_MINIMUM_NETWORK_DELAY : number = parseInt(process?.env?.DLDB_MINIMUM_NETWORK_DELAY ?? '1', 10);
+
+/**
  * Delay to wait until sending the data to remote node(s) in milliseconds.
  */
 export const DLDB_SEND_DELAY : number = parseInt(process?.env?.DLDB_SEND_DELAY ?? '300', 10);

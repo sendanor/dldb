@@ -44,6 +44,7 @@ Start the first node:
 
 ```
 $ DLDB_INCOMING_SECRET='9006d55d6e812ca3cf599dd70bf7142bddc4077553caafc505cb609edbc6e48bd86acf76b52e5903a125950dfedd70c32144bd59adcd798f3a504dc3c7bc37e9' \
+DLDB_REQUEST_SECRET='12345' \
 DLDB_PORT=3000 \
 DLDB_NODES='http://localhost:3001' \
 npm start
@@ -53,6 +54,7 @@ Start the second node:
 
 ```
 $ DLDB_INCOMING_SECRET='9006d55d6e812ca3cf599dd70bf7142bddc4077553caafc505cb609edbc6e48bd86acf76b52e5903a125950dfedd70c32144bd59adcd798f3a504dc3c7bc37e9' \
+DLDB_REQUEST_SECRET='12345' \
 DLDB_PORT=3001 \
 DLDB_NODES='http://localhost:3000' \
 npm start

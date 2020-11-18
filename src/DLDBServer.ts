@@ -33,6 +33,14 @@ export interface PostQueueObject extends GetQueueObject {
 
 }
 
+export interface DeleteQueueObject extends GetQueueObject {
+
+    id: string;
+
+    res: ServerResponse;
+
+}
+
 export enum DLDBResponseStatus {
 
     OK = 'OK',
@@ -76,8 +84,8 @@ export class DLDBServer {
     private _timeout         : Record<string, any>;
 
     private _getQueue  : Array<GetQueueObject>;
-
     private _postQueue : Array<PostQueueObject>;
+    private _deleteQueue : Array<DeleteQueueObject>;
 
     private readonly _nodeDataRequestLevels : Record<string, Record<string, DataRequestLevel>>;
     private readonly _nodeAverageSpeed      : Record<string, number>;
@@ -88,8 +96,8 @@ export class DLDBServer {
         this._serverStateOk = true;
 
         this._getQueue  = [];
-
         this._postQueue = [];
+        this._deleteQueue = [];
 
         this._nodeDataRequestLevels = {};
 
@@ -472,17 +480,52 @@ export class DLDBServer {
      *
      * Returns the updated data.
      */
-    public processIncomingDataPayload (level: DataRequestLevel, data: Record<string, any>, resourceId: string) : Record<string, any> {
+    public processIncomingDataPayload (level: DataRequestLevel, data: Record<string, any>, resourceId: string) : Record<string, any> | undefined {
+
+        // FIXME: This function requires error handling
 
         let newData = data;
 
-        let postQueue = this._postQueue.filter(item => item.id === resourceId);
-        let getQueue  =  this._getQueue.filter(item => item.id === resourceId);
-
-        this._postQueue = this._postQueue.filter(item => item.id !== resourceId);
-        this._getQueue  =  this._getQueue.filter(item => item.id !== resourceId);
+        let getQueue   = this._getQueue.filter(item => item.id === resourceId);
+        this._getQueue = this._getQueue.filter(item => item.id !== resourceId);
 
         if (level === DataRequestLevel.WRITE_ACCESS) {
+
+            let deleteQueue   = this._deleteQueue.filter(item => item.id === resourceId);
+            this._deleteQueue = this._deleteQueue.filter(item => item.id !== resourceId);
+
+            let postQueue   = this._postQueue.filter(item => item.id === resourceId);
+            this._postQueue = this._postQueue.filter(item => item.id !== resourceId);
+
+            if (deleteQueue.length) {
+
+                while (deleteQueue.length) {
+
+                    const item : DeleteQueueObject = deleteQueue.shift();
+
+                    HttpUtils.jsonResponse(item.res, 200, {status: 'DELETED'});
+
+                }
+
+                while (postQueue.length) {
+
+                    const item : PostQueueObject = postQueue.shift();
+
+                    HttpUtils.jsonResponse(item.res, 404, {status: 'DELETED', error: 'Resource has been deleted'});
+
+                }
+
+                while (getQueue.length) {
+
+                    const item : GetQueueObject = getQueue.shift();
+
+                    HttpUtils.jsonResponse(item.res, 404, {status: 'DELETED', error: 'Resource has been deleted'});
+
+                }
+
+                return undefined;
+
+            }
 
             while (postQueue.length) {
 
@@ -554,6 +597,16 @@ export class DLDBServer {
 
                 break;
 
+            case HttpMethod.DELETE:
+
+                this._deleteQueue.push({res, id: resourceId});
+
+                DLDBServer.sendDataRequest(DataRequestLevel.WRITE_ACCESS, DLDB_NODES, resourceId, DLDB_REQUEST_SECRET);
+
+                this._clearTimeout(resourceId);
+
+                break;
+
             default:
                 HttpUtils.errorResponse(res,405, 'Method not supported');
 
@@ -612,51 +665,63 @@ export class DLDBServer {
 
         if (data.level === DataRequestLevel.WRITE_ACCESS) {
 
-            if (this._getTargetsRequestingReadOrWriteAccess(resourceId).length) {
+            if (newData === undefined) {
 
-                const writeTarget = this.sendDataToOneOfTargets({
-                    from: DLDB_PUBLIC_URL,
-                    secret: passphrase,
-                    level: DataRequestLevel.WRITE_ACCESS,
-                    payload: newData
-                }, DLDB_NODES, resourceId);
-
-                const readOnlyTargets = this._getTargetsRequestingReadAccess(resourceId).filter(item => item !== writeTarget);
-
-                if (readOnlyTargets.length) {
-
-                    readOnlyTargets.forEach(readTarget => {
-
-                        this.sendDataToOneOfTargets({
-                            from: DLDB_PUBLIC_URL,
-                            secret: passphrase,
-                            level: DataRequestLevel.READ_ACCESS,
-                            payload: newData
-                        }, [readTarget], resourceId);
-
-                    });
-
+                if (this._getTargetsRequestingReadOrWriteAccess(resourceId).length) {
+                    console.warn('Warning! The data was deleted but there was nodes requesting access.');
+                } else {
+                    console.debug('The data was deleted and nobody requesting access.');
                 }
 
             } else {
 
-                this._clearTimeout(resourceId);
+                if (this._getTargetsRequestingReadOrWriteAccess(resourceId).length) {
 
-                this._timeoutCallback[resourceId] = () => {
-
-                    delete this._timeout[resourceId];
-                    delete this._timeoutCallback[resourceId];
-
-                    this.sendDataToOneOfTargets({
+                    const writeTarget = this.sendDataToOneOfTargets({
                         from: DLDB_PUBLIC_URL,
                         secret: passphrase,
                         level: DataRequestLevel.WRITE_ACCESS,
                         payload: newData
                     }, DLDB_NODES, resourceId);
 
-                };
+                    const readOnlyTargets = this._getTargetsRequestingReadAccess(resourceId).filter(item => item !== writeTarget);
 
-                this._timeout[resourceId] = setTimeout(this._timeoutCallback[resourceId], DLDB_SEND_DELAY);
+                    if (readOnlyTargets.length) {
+
+                        readOnlyTargets.forEach(readTarget => {
+
+                            this.sendDataToOneOfTargets({
+                                from: DLDB_PUBLIC_URL,
+                                secret: passphrase,
+                                level: DataRequestLevel.READ_ACCESS,
+                                payload: newData
+                            }, [readTarget], resourceId);
+
+                        });
+
+                    }
+
+                } else {
+
+                    this._clearTimeout(resourceId);
+
+                    this._timeoutCallback[resourceId] = () => {
+
+                        delete this._timeout[resourceId];
+                        delete this._timeoutCallback[resourceId];
+
+                        this.sendDataToOneOfTargets({
+                            from: DLDB_PUBLIC_URL,
+                            secret: passphrase,
+                            level: DataRequestLevel.WRITE_ACCESS,
+                            payload: newData
+                        }, DLDB_NODES, resourceId);
+
+                    };
+
+                    this._timeout[resourceId] = setTimeout(this._timeoutCallback[resourceId], DLDB_SEND_DELAY);
+
+                }
 
             }
 

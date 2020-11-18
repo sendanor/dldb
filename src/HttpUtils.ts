@@ -5,8 +5,8 @@ const HTTP = require('http');
 export enum HttpMethod {
 
     GET = 'get',
-
-    POST = 'post'
+    POST = 'post',
+    DELETE = 'delete'
 
 }
 
@@ -17,8 +17,9 @@ export class HttpUtils {
         value = StringUtils.toLowerCase(value);
 
         switch (value) {
-            case 'get'  : return HttpMethod.GET;
-            case 'post' : return HttpMethod.POST;
+            case 'get'    : return HttpMethod.GET;
+            case 'post'   : return HttpMethod.POST;
+            case 'delete' : return HttpMethod.DELETE;
         }
 
         return undefined;

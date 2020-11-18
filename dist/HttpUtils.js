@@ -18,6 +18,7 @@ var HttpMethod;
 (function (HttpMethod) {
     HttpMethod["GET"] = "get";
     HttpMethod["POST"] = "post";
+    HttpMethod["DELETE"] = "delete";
 })(HttpMethod = exports.HttpMethod || (exports.HttpMethod = {}));
 var HttpUtils = /** @class */ (function () {
     function HttpUtils() {
@@ -27,6 +28,7 @@ var HttpUtils = /** @class */ (function () {
         switch (value) {
             case 'get': return HttpMethod.GET;
             case 'post': return HttpMethod.POST;
+            case 'delete': return HttpMethod.DELETE;
         }
         return undefined;
     };

@@ -32,6 +32,7 @@ var DLDBServer = /** @class */ (function () {
         this._serverStateOk = true;
         this._getQueue = [];
         this._postQueue = [];
+        this._deleteQueue = [];
         this._nodeDataRequestLevels = {};
         this._nodeAverageSpeed = {};
         this._nodeAverageSampleSize = {};
@@ -271,12 +272,30 @@ var DLDBServer = /** @class */ (function () {
      * Returns the updated data.
      */
     DLDBServer.prototype.processIncomingDataPayload = function (level, data, resourceId) {
+        // FIXME: This function requires error handling
         var newData = data;
-        var postQueue = this._postQueue.filter(function (item) { return item.id === resourceId; });
         var getQueue = this._getQueue.filter(function (item) { return item.id === resourceId; });
-        this._postQueue = this._postQueue.filter(function (item) { return item.id !== resourceId; });
         this._getQueue = this._getQueue.filter(function (item) { return item.id !== resourceId; });
         if (level === DataRequestLevel.WRITE_ACCESS) {
+            var deleteQueue = this._deleteQueue.filter(function (item) { return item.id === resourceId; });
+            this._deleteQueue = this._deleteQueue.filter(function (item) { return item.id !== resourceId; });
+            var postQueue = this._postQueue.filter(function (item) { return item.id === resourceId; });
+            this._postQueue = this._postQueue.filter(function (item) { return item.id !== resourceId; });
+            if (deleteQueue.length) {
+                while (deleteQueue.length) {
+                    var item = deleteQueue.shift();
+                    HttpUtils_1["default"].jsonResponse(item.res, 200, { status: 'DELETED' });
+                }
+                while (postQueue.length) {
+                    var item = postQueue.shift();
+                    HttpUtils_1["default"].jsonResponse(item.res, 404, { status: 'DELETED', error: 'Resource has been deleted' });
+                }
+                while (getQueue.length) {
+                    var item = getQueue.shift();
+                    HttpUtils_1["default"].jsonResponse(item.res, 404, { status: 'DELETED', error: 'Resource has been deleted' });
+                }
+                return undefined;
+            }
             while (postQueue.length) {
                 var item = postQueue.shift();
                 var oldData = data;
@@ -316,6 +335,11 @@ var DLDBServer = /** @class */ (function () {
                     DLDBServer.sendDataRequest(DataRequestLevel.WRITE_ACCESS, Environment_1.DLDB_NODES, resourceId, Environment_1.DLDB_REQUEST_SECRET);
                     _this._clearTimeout(resourceId);
                 })["catch"](function (err) { return DLDBServer.processBadRequestParseErrorResponse(res, err); });
+                break;
+            case HttpUtils_1.HttpMethod.DELETE:
+                this._deleteQueue.push({ res: res, id: resourceId });
+                DLDBServer.sendDataRequest(DataRequestLevel.WRITE_ACCESS, Environment_1.DLDB_NODES, resourceId, Environment_1.DLDB_REQUEST_SECRET);
+                this._clearTimeout(resourceId);
                 break;
             default:
                 HttpUtils_1["default"].errorResponse(res, 405, 'Method not supported');
@@ -357,38 +381,48 @@ var DLDBServer = /** @class */ (function () {
         var newData = this.processIncomingDataPayload(data.level, payload, resourceId);
         HttpUtils_1["default"].jsonResponse(res, 200, { status: DLDBResponseStatus.OK });
         if (data.level === DataRequestLevel.WRITE_ACCESS) {
-            if (this._getTargetsRequestingReadOrWriteAccess(resourceId).length) {
-                var writeTarget_1 = this.sendDataToOneOfTargets({
-                    from: Environment_1.DLDB_PUBLIC_URL,
-                    secret: passphrase,
-                    level: DataRequestLevel.WRITE_ACCESS,
-                    payload: newData
-                }, Environment_1.DLDB_NODES, resourceId);
-                var readOnlyTargets = this._getTargetsRequestingReadAccess(resourceId).filter(function (item) { return item !== writeTarget_1; });
-                if (readOnlyTargets.length) {
-                    readOnlyTargets.forEach(function (readTarget) {
-                        _this.sendDataToOneOfTargets({
-                            from: Environment_1.DLDB_PUBLIC_URL,
-                            secret: passphrase,
-                            level: DataRequestLevel.READ_ACCESS,
-                            payload: newData
-                        }, [readTarget], resourceId);
-                    });
+            if (newData === undefined) {
+                if (this._getTargetsRequestingReadOrWriteAccess(resourceId).length) {
+                    console.warn('Warning! The data was deleted but there was nodes requesting access.');
+                }
+                else {
+                    console.debug('The data was deleted and nobody requesting access.');
                 }
             }
             else {
-                this._clearTimeout(resourceId);
-                this._timeoutCallback[resourceId] = function () {
-                    delete _this._timeout[resourceId];
-                    delete _this._timeoutCallback[resourceId];
-                    _this.sendDataToOneOfTargets({
+                if (this._getTargetsRequestingReadOrWriteAccess(resourceId).length) {
+                    var writeTarget_1 = this.sendDataToOneOfTargets({
                         from: Environment_1.DLDB_PUBLIC_URL,
                         secret: passphrase,
                         level: DataRequestLevel.WRITE_ACCESS,
                         payload: newData
                     }, Environment_1.DLDB_NODES, resourceId);
-                };
-                this._timeout[resourceId] = setTimeout(this._timeoutCallback[resourceId], Environment_1.DLDB_SEND_DELAY);
+                    var readOnlyTargets = this._getTargetsRequestingReadAccess(resourceId).filter(function (item) { return item !== writeTarget_1; });
+                    if (readOnlyTargets.length) {
+                        readOnlyTargets.forEach(function (readTarget) {
+                            _this.sendDataToOneOfTargets({
+                                from: Environment_1.DLDB_PUBLIC_URL,
+                                secret: passphrase,
+                                level: DataRequestLevel.READ_ACCESS,
+                                payload: newData
+                            }, [readTarget], resourceId);
+                        });
+                    }
+                }
+                else {
+                    this._clearTimeout(resourceId);
+                    this._timeoutCallback[resourceId] = function () {
+                        delete _this._timeout[resourceId];
+                        delete _this._timeoutCallback[resourceId];
+                        _this.sendDataToOneOfTargets({
+                            from: Environment_1.DLDB_PUBLIC_URL,
+                            secret: passphrase,
+                            level: DataRequestLevel.WRITE_ACCESS,
+                            payload: newData
+                        }, Environment_1.DLDB_NODES, resourceId);
+                    };
+                    this._timeout[resourceId] = setTimeout(this._timeoutCallback[resourceId], Environment_1.DLDB_SEND_DELAY);
+                }
             }
         }
     };

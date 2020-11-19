@@ -14,6 +14,8 @@ It...
  * In case of a shutdown of a single node, it tries to make sure all active requests have been served (eg. the data is on another node)
  * Can notify other nodes about a desire to read or write data
 
+[The planned version 1.0](https://docs.google.com/document/d/1OEbshK8S2qa7_pSf8gWNKiszheQa77Pr_0fm93ZKF68/edit?usp=sharing) will be a powerful platform to run globally available and persistent cloud applications.
+ 
 ### Other projects like this
 
  * [pingfs](https://github.com/yarrick/pingfs)

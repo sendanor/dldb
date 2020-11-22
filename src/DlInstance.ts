@@ -1,15 +1,30 @@
 import DlObject from "./DlObject";
 import DlObjectState from "./DlObjectState";
 import AssertUtils from "./AssertUtils";
+import Observer, {ObserverDestructor} from "./Observer";
+
+export enum DlInstanceEvent {
+
+    STATE_CHANGED = 'DlInstanceEvent:stateChanged'
+
+}
 
 export class DlInstance<T> {
 
-    private _obj   : DlObject<T> | undefined;
-    private _state : DlObjectState;
+    public static Event = DlInstanceEvent;
+
+    private _obj      : DlObject<T> | undefined;
+    private _state    : DlObjectState;
+    private _observer : Observer<DlInstanceEvent>;
 
     public constructor (obj : DlObject<T> | undefined, state : DlObjectState) {
         this._obj = obj;
         this._state = state;
+        this._observer = new Observer<DlInstanceEvent>('DlInstance');
+    }
+
+    public on (name : DlInstanceEvent, callback) : ObserverDestructor {
+        return this._observer.listenEvent(name, callback);
     }
 
     public getState () : DlObjectState {
@@ -19,7 +34,6 @@ export class DlInstance<T> {
     public getObject () : DlObject<T> | undefined {
         return this._obj;
     }
-
 
     public isMounted () : boolean {
         return this._state >= DlObjectState.PRE_INITIALIZED_AND_MOUNTED;
@@ -142,38 +156,40 @@ export class DlInstance<T> {
 
     private _setState (newState: DlObjectState) {
 
+        const oldState = this._state;
+
         switch(newState) {
 
             case DlObjectState.DESTROYED:
-                AssertUtils.notEqual(this._state, DlObjectState.DESTROYED);
+                AssertUtils.notEqual(oldState, DlObjectState.DESTROYED);
                 break;
 
             case DlObjectState.PRE_DESTROYED:
-                AssertUtils.notEqual(this._state, DlObjectState.PRE_DESTROYED);
+                AssertUtils.notEqual(oldState, DlObjectState.PRE_DESTROYED);
                 break;
 
             case DlObjectState.CONSTRUCTED:
-                AssertUtils.notEqual(this._state, DlObjectState.CONSTRUCTED);
+                AssertUtils.notEqual(oldState, DlObjectState.CONSTRUCTED);
                 break;
 
             case DlObjectState.UNMOUNTED:
-                AssertUtils.notEqual(this._state, DlObjectState.UNMOUNTED);
+                AssertUtils.notEqual(oldState, DlObjectState.UNMOUNTED);
                 break;
 
             case DlObjectState.PRE_INITIALIZED:
-                AssertUtils.notEqual(this._state, DlObjectState.PRE_INITIALIZED);
+                AssertUtils.notEqual(oldState, DlObjectState.PRE_INITIALIZED);
                 break;
 
             case DlObjectState.PRE_INITIALIZED_AND_MOUNTED:
-                AssertUtils.notEqual(this._state, DlObjectState.PRE_INITIALIZED_AND_MOUNTED);
+                AssertUtils.notEqual(oldState, DlObjectState.PRE_INITIALIZED_AND_MOUNTED);
                 break;
 
             case DlObjectState.WILL_BE_DESTROYED:
-                AssertUtils.notEqual(this._state, DlObjectState.WILL_BE_DESTROYED);
+                AssertUtils.notEqual(oldState, DlObjectState.WILL_BE_DESTROYED);
                 break;
 
             case DlObjectState.MOUNTED:
-                AssertUtils.notEqual(this._state, DlObjectState.MOUNTED);
+                AssertUtils.notEqual(oldState, DlObjectState.MOUNTED);
                 break;
 
             default:
@@ -182,6 +198,8 @@ export class DlInstance<T> {
         }
 
         this._state = newState;
+
+        this._observer.triggerEvent(DlInstanceEvent.STATE_CHANGED, newState, oldState);
 
     }
 

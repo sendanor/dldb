@@ -3,6 +3,8 @@
 
 import AssertUtils from "./AssertUtils";
 
+const ENABLE_EMPTY_LISTENER_WARNING : boolean = !!process.env?.WARN_UNUSED_LISTENERS;
+
 export interface ObserverCallback<EventName extends keyof any> {
     (event: EventName, ...args : Array<any>) : void;
 }
@@ -117,7 +119,9 @@ export class Observer<EventName extends keyof any> {
     public triggerEvent (eventName : EventName, ...args : Array<any>) {
 
         if (!this.hasCallbacks(eventName)) {
-            console.warn(`Warning! The observer for "${this._name}" did not have anything listening "${eventName}"`);
+            if (ENABLE_EMPTY_LISTENER_WARNING) {
+                console.warn(`Warning! The observer for "${this._name}" did not have anything listening "${eventName}"`);
+            }
             return;
         }
 

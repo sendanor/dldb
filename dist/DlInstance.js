@@ -1,13 +1,22 @@
 "use strict";
 exports.__esModule = true;
-exports.DlInstance = void 0;
+exports.DlInstance = exports.DlInstanceEvent = void 0;
 var DlObjectState_1 = require("./DlObjectState");
 var AssertUtils_1 = require("./AssertUtils");
+var Observer_1 = require("./Observer");
+var DlInstanceEvent;
+(function (DlInstanceEvent) {
+    DlInstanceEvent["STATE_CHANGED"] = "DlInstanceEvent:stateChanged";
+})(DlInstanceEvent = exports.DlInstanceEvent || (exports.DlInstanceEvent = {}));
 var DlInstance = /** @class */ (function () {
     function DlInstance(obj, state) {
         this._obj = obj;
         this._state = state;
+        this._observer = new Observer_1["default"]('DlInstance');
     }
+    DlInstance.prototype.on = function (name, callback) {
+        return this._observer.listenEvent(name, callback);
+    };
     DlInstance.prototype.getState = function () {
         return this._state;
     };
@@ -104,35 +113,37 @@ var DlInstance = /** @class */ (function () {
         }
     };
     DlInstance.prototype._setState = function (newState) {
+        var oldState = this._state;
         switch (newState) {
             case DlObjectState_1["default"].DESTROYED:
-                AssertUtils_1["default"].notEqual(this._state, DlObjectState_1["default"].DESTROYED);
+                AssertUtils_1["default"].notEqual(oldState, DlObjectState_1["default"].DESTROYED);
                 break;
             case DlObjectState_1["default"].PRE_DESTROYED:
-                AssertUtils_1["default"].notEqual(this._state, DlObjectState_1["default"].PRE_DESTROYED);
+                AssertUtils_1["default"].notEqual(oldState, DlObjectState_1["default"].PRE_DESTROYED);
                 break;
             case DlObjectState_1["default"].CONSTRUCTED:
-                AssertUtils_1["default"].notEqual(this._state, DlObjectState_1["default"].CONSTRUCTED);
+                AssertUtils_1["default"].notEqual(oldState, DlObjectState_1["default"].CONSTRUCTED);
                 break;
             case DlObjectState_1["default"].UNMOUNTED:
-                AssertUtils_1["default"].notEqual(this._state, DlObjectState_1["default"].UNMOUNTED);
+                AssertUtils_1["default"].notEqual(oldState, DlObjectState_1["default"].UNMOUNTED);
                 break;
             case DlObjectState_1["default"].PRE_INITIALIZED:
-                AssertUtils_1["default"].notEqual(this._state, DlObjectState_1["default"].PRE_INITIALIZED);
+                AssertUtils_1["default"].notEqual(oldState, DlObjectState_1["default"].PRE_INITIALIZED);
                 break;
             case DlObjectState_1["default"].PRE_INITIALIZED_AND_MOUNTED:
-                AssertUtils_1["default"].notEqual(this._state, DlObjectState_1["default"].PRE_INITIALIZED_AND_MOUNTED);
+                AssertUtils_1["default"].notEqual(oldState, DlObjectState_1["default"].PRE_INITIALIZED_AND_MOUNTED);
                 break;
             case DlObjectState_1["default"].WILL_BE_DESTROYED:
-                AssertUtils_1["default"].notEqual(this._state, DlObjectState_1["default"].WILL_BE_DESTROYED);
+                AssertUtils_1["default"].notEqual(oldState, DlObjectState_1["default"].WILL_BE_DESTROYED);
                 break;
             case DlObjectState_1["default"].MOUNTED:
-                AssertUtils_1["default"].notEqual(this._state, DlObjectState_1["default"].MOUNTED);
+                AssertUtils_1["default"].notEqual(oldState, DlObjectState_1["default"].MOUNTED);
                 break;
             default:
                 throw new TypeError('Unsupported state: ' + newState);
         }
         this._state = newState;
+        this._observer.triggerEvent(DlInstanceEvent.STATE_CHANGED, newState, oldState);
     };
     DlInstance.prototype._objectDidMount = function () {
         AssertUtils_1["default"].isFalse(this.isMounted());
@@ -170,6 +181,7 @@ var DlInstance = /** @class */ (function () {
         this._callMethod('objectDidInitialize');
         this._setState(DlObjectState_1["default"].MOUNTED);
     };
+    DlInstance.Event = DlInstanceEvent;
     return DlInstance;
 }());
 exports.DlInstance = DlInstance;

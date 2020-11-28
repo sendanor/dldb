@@ -4,6 +4,9 @@ exports.AssertUtils = exports.Test = void 0;
 var Test = /** @class */ (function () {
     function Test() {
     }
+    Test.isString = function (value) {
+        return typeof value === 'string';
+    };
     Test.isObject = function (value) {
         return value && typeof value === 'object' && !(value instanceof Array);
     };
@@ -79,6 +82,16 @@ var AssertUtils = /** @class */ (function () {
     AssertUtils.notObject = function (value) {
         if (Test.isObject(value)) {
             throw new TypeError('Value was object: ' + value);
+        }
+    };
+    AssertUtils.isString = function (value) {
+        if (!Test.isString(value)) {
+            throw new TypeError('Value was not string: ' + value);
+        }
+    };
+    AssertUtils.notString = function (value) {
+        if (Test.isString(value)) {
+            throw new TypeError('Value was string: ' + value);
         }
     };
     AssertUtils.isArray = function (value) {

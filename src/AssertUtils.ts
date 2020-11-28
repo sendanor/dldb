@@ -1,6 +1,10 @@
 
 export class Test {
 
+    static isString (value: any) : boolean {
+        return typeof value === 'string';
+    }
+
     static isObject (value: any) : boolean {
         return value && typeof value === 'object' && !(value instanceof Array);
     }
@@ -108,6 +112,22 @@ export class AssertUtils {
 
         if (Test.isObject(value)) {
             throw new TypeError('Value was object: ' + value);
+        }
+
+    }
+
+    public static isString (value : any) {
+
+        if (!Test.isString(value)) {
+            throw new TypeError('Value was not string: ' + value);
+        }
+
+    }
+
+    public static notString (value : any) {
+
+        if (Test.isString(value)) {
+            throw new TypeError('Value was string: ' + value);
         }
 
     }

@@ -49,8 +49,8 @@ export class ProcessUtils {
         AssertUtils.isObject(params);
 
         process.env = {
-            ...process.env,
-            ...params
+            ...params,
+            ...process.env
         };
 
     }
